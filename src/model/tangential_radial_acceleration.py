@@ -1,5 +1,15 @@
+import os
+import cv2
+
 import numpy as np
+from numpy.core.fromnumeric import sort
 from numpy.linalg import inv
+from PIL import Image
+from tqdm import tqdm
+
+INPUT_SEQUENCES_DIR = 'data/processed/sequences/'
+INPUT_SILHOUETTES_DIR = 'data/raw/silhouettes/'
+OUTPUT_DIR = 'data/results/'
 
 
 def circle_centre(x1, y1, x2, y2, x3, y3):
@@ -128,3 +138,110 @@ def calc_tan_rad(mask_m_rows, mask_n_cols, i, j, u1, v1, u2, v2):
         O_j = j
 
     return radial_i, radial_j, tangential_i, tangential_j, O_i, O_j
+
+
+if __name__ == '__main__':
+    # iterate over each sequence
+    for dirpath, dirnames, filenames in os.walk(INPUT_SEQUENCES_DIR):
+        print('Processing:', dirpath)
+
+        # id of the sequence video
+        seq_id = os.path.basename(dirpath)
+
+        # sort sequence frames
+        frames = sort(filenames)
+
+        # iterative over all frames
+        for i in tqdm(range(len(frames) - 2), desc=seq_id):
+
+            # retrieve next three frames (NOTE: 0-255 scale)
+            frame1 = np.array(Image.open(
+                f'{INPUT_SEQUENCES_DIR}{seq_id}/{frames[i]}'))
+            frame2 = np.array(Image.open(
+                f'{INPUT_SEQUENCES_DIR}{seq_id}/{frames[i+1]}'))
+            frame3 = np.array(Image.open(
+                f'{INPUT_SEQUENCES_DIR}{seq_id}/{frames[i+2]}'))
+
+            # obtain frame dimensions
+            frame_rows, frame_cols, frame_dims = frame1.shape
+
+            # retrieve corresponding silhouettes (NOTE: 0-1 scale)
+            mask1 = np.array(Image.open(
+                f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[i]}'), dtype=float)
+            mask2 = np.array(Image.open(
+                f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[i+1]}'), dtype=float)
+            mask3 = np.array(Image.open(
+                f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[i+2]}'), dtype=float)
+
+            # obtain coordinates of mask (where intensity is 1)
+            mask_coords1 = np.argwhere(mask1 == 1)
+            mask_coords2 = np.argwhere(mask2 == 1)
+            mask_coords3 = np.argwhere(mask3 == 1)
+
+            # calculate dimensions of each mask
+            mask1_width_min = min(mask_coords1[:, 0])
+            mask1_width_max = max(mask_coords1[:, 0])
+            mask1_height_min = min(mask_coords1[:, 1])
+            mask1_height_max = max(mask_coords1[:, 1])
+
+            mask2_width_min = min(mask_coords2[:, 0])
+            mask2_width_max = max(mask_coords2[:, 0])
+            mask2_height_min = min(mask_coords2[:, 1])
+            mask2_height_max = max(mask_coords2[:, 1])
+
+            mask3_width_min = min(mask_coords3[:, 0])
+            mask3_width_max = max(mask_coords3[:, 0])
+            mask3_height_min = min(mask_coords3[:, 1])
+            mask3_height_max = max(mask_coords3[:, 1])
+
+            # calculate the union dimensions of the three masks (clip at 0 and frame_rows/cols)
+            mask_boundaryL = max(
+                min(mask1_width_min, mask2_width_min, mask3_width_min) - 50,
+                0
+            )
+            mask_boundaryR = min(
+                max(mask1_width_max, mask2_width_max, mask3_width_max) + 50,
+                frame_cols
+            )
+            mask_boundaryT = max(
+                min(mask1_height_min, mask2_height_min, mask3_height_min) - 50,
+                0
+            )
+            mask_boundaryB = min(
+                max(mask1_height_max, mask2_height_max, mask3_height_max) + 50,
+                frame_rows
+            )
+
+            # region of interest in frames
+            cropped_frame1 = frame1[mask_boundaryT:mask_boundaryB,
+                                    mask_boundaryL:mask_boundaryR]
+            cropped_frame2 = frame2[mask_boundaryT:mask_boundaryB,
+                                    mask_boundaryL:mask_boundaryR]
+            cropped_frame3 = frame3[mask_boundaryT:mask_boundaryB,
+                                    mask_boundaryL:mask_boundaryR]
+
+            # creates object to compute optical flow by DeepFlow method
+            # TODO: replace with DeepFlow2 and use RBG cropped_frameX
+            opt_flow = cv2.optflow.createOptFlow_DeepFlow()
+
+            # velocity field V(t ~ t-∆t)
+            opt1 = opt_flow.calc(
+                cv2.cvtColor(cropped_frame2, cv2.COLOR_BGR2GRAY),
+                cv2.cvtColor(cropped_frame1, cv2.COLOR_BGR2GRAY),
+                None
+            )
+
+            # velocity field V(t ~ t+∆t)
+            opt2 = opt_flow.calc(
+                cv2.cvtColor(cropped_frame2, cv2.COLOR_BGR2GRAY),
+                cv2.cvtColor(cropped_frame3, cv2.COLOR_BGR2GRAY),
+                None
+            )
+
+            # horizontal (dx) and vertical (dy) displacement (~velocity field)
+            u1 = opt1[:, :, 0]
+            v1 = opt1[:, :, 1]
+            u2 = opt2[:, :, 0]
+            v2 = opt2[:, :, 1]
+
+            # TODO: acceleration flow
