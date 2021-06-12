@@ -11,6 +11,8 @@ INPUT_SEQUENCES_DIR = 'data/processed/sequences/'
 INPUT_SILHOUETTES_DIR = 'data/raw/silhouettes/'
 OUTPUT_DIR = 'data/results/'
 
+ACC_MAGNITUDE_THRESHOLD = 1
+
 
 def circle_centre(x1, y1, x2, y2, x3, y3):
     """Calculates the coordinates of O, the centre of the circular motion
@@ -43,32 +45,32 @@ def rotate(x, y, theta):
 # TODO: ask for reason?
 
 
-def imageplane_to_cartesian(x, y, mask_m_rows, mask_n_cols):
+def imageplane_to_cartesian(x, y, mask_rows, mask_cols):
     transf_matrix = np.array([[1, 0, 0],  # aspect ratio
                               [0, -1, 0],  # aspect ratio
-                              [-0.5*mask_n_cols, 0.5*mask_m_rows, 1]])  # keystone distortions (homography / projective transformation)
+                              [-0.5*mask_cols, 0.5*mask_rows, 1]])  # keystone distortions (homography / projective transformation)
     transformed = np.array([[x, y, 1]]) @ transf_matrix
 
     # TODO: need to divide by transformed[0, 2]? see computer vision slides L8-consistency
     return transformed[0, 0], transformed[0, 1]
 
 
-def cartesian_to_imageplane(x, y, mask_m_rows, mask_n_cols):
+def cartesian_to_imageplane(x, y, mask_rows, mask_cols):
     transf_matrix = np.array([[1, 0, 0],
                               [0, -1, 0],
-                              [0.5*mask_n_cols, 0.5*mask_m_rows, 1]])
+                              [0.5*mask_cols, 0.5*mask_rows, 1]])
     transformed = np.array([[x, y, 1]]) @ transf_matrix
 
     return transformed[0, 0], transformed[0, 1]
 
 
-def calc_tan_rad(mask_m_rows, mask_n_cols, i, j, u1, v1, u2, v2):
+def calc_tan_rad(mask_rows, mask_cols, i, j, u1, v1, u2, v2):
     """Calculates the tangential and radial acceleration TODO
 
-    :param mask_m_rows: number of rows in the mask
-    :type mask_m_rows: int
-    :param mask_n_cols: number of columns in the mask
-    :type mask_n_cols: int
+    :param mask_rows: number of rows in the mask
+    :type mask_rows: int
+    :param mask_cols: number of columns in the mask
+    :type mask_cols: int
     :param i: i coordinate of the mask
     :type i: int
     :param j: j coordinate of the mask
@@ -83,7 +85,7 @@ def calc_tan_rad(mask_m_rows, mask_n_cols, i, j, u1, v1, u2, v2):
     :type v2: [type] TODO
     """
 
-    x, y = imageplane_to_cartesian(j, i, mask_m_rows, mask_n_cols)
+    x, y = imageplane_to_cartesian(j, i, mask_rows, mask_cols)
 
     back_x = x + u1
     back_y = y - v1
@@ -125,10 +127,10 @@ def calc_tan_rad(mask_m_rows, mask_n_cols, i, j, u1, v1, u2, v2):
 
         # project coordinates back onto the image plane
         radial_j, radial_i = cartesian_to_imageplane(
-            radial_x, radial_y, mask_m_rows, mask_n_cols)
+            radial_x, radial_y, mask_rows, mask_cols)
         tangential_j, tangential_i = cartesian_to_imageplane(
-            tangential_x, tangential_y, mask_m_rows, mask_n_cols)
-        O_j, O_i = cartesian_to_imageplane(O_x, O_y, mask_m_rows, mask_n_cols)
+            tangential_x, tangential_y, mask_rows, mask_cols)
+        O_j, O_i = cartesian_to_imageplane(O_x, O_y, mask_rows, mask_cols)
     else:
         radial_i = 0
         radial_j = 0
@@ -152,26 +154,29 @@ if __name__ == '__main__':
         frames = sort(filenames)
 
         # iterative over all frames
-        for i in tqdm(range(len(frames) - 2), desc=seq_id):
+        for frame_i in tqdm(range(len(frames) - 2), desc=seq_id):
 
             # retrieve next three frames (NOTE: 0-255 scale)
             frame1 = np.array(Image.open(
-                f'{INPUT_SEQUENCES_DIR}{seq_id}/{frames[i]}'))
+                f'{INPUT_SEQUENCES_DIR}{seq_id}/{frames[frame_i]}'))
             frame2 = np.array(Image.open(
-                f'{INPUT_SEQUENCES_DIR}{seq_id}/{frames[i+1]}'))
+                f'{INPUT_SEQUENCES_DIR}{seq_id}/{frames[frame_i+1]}'))
             frame3 = np.array(Image.open(
-                f'{INPUT_SEQUENCES_DIR}{seq_id}/{frames[i+2]}'))
+                f'{INPUT_SEQUENCES_DIR}{seq_id}/{frames[frame_i+2]}'))
 
             # obtain frame dimensions
             frame_rows, frame_cols, frame_dims = frame1.shape
 
             # retrieve corresponding silhouettes (NOTE: 0-1 scale)
             mask1 = np.array(Image.open(
-                f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[i]}'), dtype=float)
+                f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i]}'), dtype=float)
             mask2 = np.array(Image.open(
-                f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[i+1]}'), dtype=float)
+                f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i+1]}'), dtype=float)
             mask3 = np.array(Image.open(
-                f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[i+2]}'), dtype=float)
+                f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i+2]}'), dtype=float)
+
+            # obtain mask dimensions
+            mask_rows, mask_cols = mask1.shape
 
             # obtain coordinates of mask (where intensity is 1)
             mask_coords1 = np.argwhere(mask1 == 1)
@@ -195,30 +200,30 @@ if __name__ == '__main__':
             mask3_height_max = max(mask_coords3[:, 1])
 
             # calculate the union dimensions of the three masks (clip at 0 and frame_rows/cols)
-            mask_boundaryL = max(
+            mask_L_boundary = max(
                 min(mask1_width_min, mask2_width_min, mask3_width_min) - 50,
                 0
             )
-            mask_boundaryR = min(
+            mask_R_boundary = min(
                 max(mask1_width_max, mask2_width_max, mask3_width_max) + 50,
                 frame_cols
             )
-            mask_boundaryT = max(
+            mask_T_boundary = max(
                 min(mask1_height_min, mask2_height_min, mask3_height_min) - 50,
                 0
             )
-            mask_boundaryB = min(
+            mask_B_boundary = min(
                 max(mask1_height_max, mask2_height_max, mask3_height_max) + 50,
                 frame_rows
             )
 
             # region of interest in frames
-            cropped_frame1 = frame1[mask_boundaryT:mask_boundaryB,
-                                    mask_boundaryL:mask_boundaryR]
-            cropped_frame2 = frame2[mask_boundaryT:mask_boundaryB,
-                                    mask_boundaryL:mask_boundaryR]
-            cropped_frame3 = frame3[mask_boundaryT:mask_boundaryB,
-                                    mask_boundaryL:mask_boundaryR]
+            cropped_frame1 = frame1[mask_T_boundary:mask_B_boundary,
+                                    mask_L_boundary:mask_R_boundary]
+            cropped_frame2 = frame2[mask_T_boundary:mask_B_boundary,
+                                    mask_L_boundary:mask_R_boundary]
+            cropped_frame3 = frame3[mask_T_boundary:mask_B_boundary,
+                                    mask_L_boundary:mask_R_boundary]
 
             # creates object to compute optical flow by DeepFlow method
             # TODO: replace with DeepFlow2 and use RBG cropped_frameX
@@ -244,4 +249,19 @@ if __name__ == '__main__':
             u2 = opt2[:, :, 0]
             v2 = opt2[:, :, 1]
 
-            # TODO: acceleration flow
+            # for each pixel in the cropped mask
+            # TODO: optimise with vectorisation
+            for i in range(mask_T_boundary, mask_B_boundary):
+                for j in range(mask_L_boundary, mask_R_boundary):
+
+                    # compute horizontal and vertical acceleration (for one pixel)
+                    acc_u = u2[i, j] + u1[i, j]
+                    acc_v = v2[i, j] + v1[i, j]
+
+                    # compute magnitude of acceleration vector
+                    acc_mag = np.sqrt(acc_u**2 + acc_v**2)
+
+                    if acc_mag > ACC_MAGNITUDE_THRESHOLD:
+                        radial_i, radial_j, tangential_i, tangential_j, O_i, O_j = calc_tan_rad(mask_rows, mask_cols, i, j,
+                                                                                                u1[i, j], v1[i, j], u2[i, j], v2[i, j])
+                        pass
