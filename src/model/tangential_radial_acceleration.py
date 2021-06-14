@@ -1,10 +1,11 @@
+# %%
 import os
 import cv2
 
 import numpy as np
 from numpy.core.fromnumeric import sort
 from numpy.linalg import inv
-from PIL import Image
+from PIL import Image, ImageDraw
 from tqdm import tqdm
 
 INPUT_SEQUENCES_DIR = 'data/processed/sequences/'
@@ -142,13 +143,125 @@ def calc_tan_rad(mask_rows, mask_cols, i, j, u1, v1, u2, v2):
     return radial_i, radial_j, tangential_i, tangential_j, O_i, O_j
 
 
+def draw_flow(u, v, flow_array, step=1, scale=1, thres=1):
+    if len(flow_array.shape) == 2:
+        flow_array = np.dstack((flow_array, flow_array, flow_array))
+
+    flow_img = Image.fromarray(flow_array)
+    draw = ImageDraw.Draw(flow_img)
+
+    for x in range(1, flow_array.shape[1], step):
+        for y in range(1, flow_array.shape[0], step):
+            dx = int(round(u[int(y), int(x)]))
+            dy = int(round(v[int(y), int(x)]))
+
+            if np.sqrt(dx**2 + dy**2) > thres:
+                end_x = x + scale*dx
+                end_y = y + scale*dy
+
+                if 0 <= end_y < flow_array.shape[0] and 0 <= end_x < flow_array.shape[1]:
+                    draw.line((x, y, end_x, end_y),
+                              fill=(255, 255, 255), width=2)
+
+    del draw
+    return flow_img
+
+
+def draw_arrows(img, flow, step=10):
+    """Draws a quiver plot. The flow field is visualized by an arrows which start at the initial position points and ends at the new position points, given the displacement.
+    Hence, the length of the arrow indicates the magnitude of the displacement.
+
+    :param img: source frame
+    :type img: ndarray
+    :param flow: optical flow field
+    :type flow: ndarray
+    :param step: spacing between the arrows, defaults to 16
+    :type step: int, optional
+    :return: source frame with a quiver plot drawn over it
+    :rtype: ndarray
+    """
+
+    # retrieve height and length of the source video
+    height, width = img.shape[:2]
+
+    # create grid to draw dots and arrays according to the step value; y = [   8    8    8 ...  712  712  712]; x = [   8   24   40 ... 1240 1256 1272]
+    y, x = np.mgrid[step/2:height:step, step /
+                    2:width:step].reshape(2, -1).astype(int)
+
+    # retrieve the delta x and delta y displacement of the positions on the grid
+    dx, dy = flow[y, x].T
+
+    # for each point in the quiver plot, get an array with the x and y position, and the x and y position plus intensity change (flow)
+    # these four numbers indicate the start and end of an arrow
+    lines = np.vstack([x, y, x+dx, y+dy]).T.reshape(-1, 2, 2)
+
+    # round floating point numbers
+    lines = np.int32(lines + 0.5)
+
+    # replaces all B, G, R channels with the gray value Y, so B=Y, G=Y, R=Y
+    # it converts a single channel image to multichannel by replicating
+    vis = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    # vis = Image.fromarray(img, mode='RGB')
+
+    # colour to use for drawing
+    ARROW_COLOUR = (0, 0, 255)
+
+    # draw lines on image vis
+    cv2.polylines(vis, lines, 0, ARROW_COLOUR, thickness=1)
+
+    # draw a circle on image vis for every point in the quiver plot
+    for (x1, y1), (_x2, _y2) in lines:
+        cv2.circle(vis, (x1, y1), 1, ARROW_COLOUR, -1)
+
+    return vis
+
+
+def draw_hsv(flow):
+    """Draws the optical flow field using the HSV colour space
+
+    :param flow: optical flow field
+    :type flow: ndarray
+    :return: mask of the flow field
+    :rtype: ndarray
+    """
+
+    # retrieve height and length of the source video
+    height, width = flow.shape[:2]
+
+    # delta x and delta y: the displacement from the respective previous frames, both on the x and y axis
+    dx, dy = flow[:, :, 0], flow[:, :, 1]
+
+    # computes the magnitude and angle of the 2D vectors
+    magnitude, angle = cv2.cartToPolar(dx, dy)
+
+    # creates a mask filled with zero intensities, with the same dimensions as the source frame
+    hsv = np.zeros((height, width, 3), np.uint8)  # np.zeroes_like(flow)
+
+    # sets image hue according to the optical flow direction
+    hsv[..., 0] = angle * 180 / np.pi / 2
+
+    # sets image saturation to maximum
+    hsv[..., 1] = 255
+
+    # sets mask value according to the optical flow magnitude (normalized)
+    hsv[..., 2] = cv2.normalize(magnitude, None, 0, 255, cv2.NORM_MINMAX)
+
+    # converts HSV (hue saturation value) to BGR (RGB) colour space/representation
+    bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+
+    return bgr
+
+
 if __name__ == '__main__':
     # iterate over each sequence
     for dirpath, dirnames, filenames in os.walk(INPUT_SEQUENCES_DIR):
-        print('Processing:', dirpath)
 
         # id of the sequence video
         seq_id = os.path.basename(dirpath)
+
+        # create output directory if doesn't exist
+        if not os.path.exists(OUTPUT_DIR + seq_id):
+            os.mkdir(OUTPUT_DIR + seq_id)
 
         # sort sequence frames
         frames = sort(filenames)
@@ -184,40 +297,40 @@ if __name__ == '__main__':
             mask_coords3 = np.argwhere(mask3 == 1)
 
             # calculate dimensions of each mask
-            mask1_width_min = min(mask_coords1[:, 0])
-            mask1_width_max = max(mask_coords1[:, 0])
-            mask1_height_min = min(mask_coords1[:, 1])
-            mask1_height_max = max(mask_coords1[:, 1])
+            mask1_row_min = min(mask_coords1[:, 0])
+            mask1_row_max = max(mask_coords1[:, 0])
+            mask1_col_min = min(mask_coords1[:, 1])
+            mask1_col_max = max(mask_coords1[:, 1])
 
-            mask2_width_min = min(mask_coords2[:, 0])
-            mask2_width_max = max(mask_coords2[:, 0])
-            mask2_height_min = min(mask_coords2[:, 1])
-            mask2_height_max = max(mask_coords2[:, 1])
+            mask2_row_min = min(mask_coords2[:, 0])
+            mask2_row_max = max(mask_coords2[:, 0])
+            mask2_col_min = min(mask_coords2[:, 1])
+            mask2_col_max = max(mask_coords2[:, 1])
 
-            mask3_width_min = min(mask_coords3[:, 0])
-            mask3_width_max = max(mask_coords3[:, 0])
-            mask3_height_min = min(mask_coords3[:, 1])
-            mask3_height_max = max(mask_coords3[:, 1])
+            mask3_row_min = min(mask_coords3[:, 0])
+            mask3_row_max = max(mask_coords3[:, 0])
+            mask3_col_min = min(mask_coords3[:, 1])
+            mask3_col_max = max(mask_coords3[:, 1])
 
             # calculate the union dimensions of the three masks (clip at 0 and frame_rows/cols)
             mask_L_boundary = max(
-                min(mask1_width_min, mask2_width_min, mask3_width_min) - 50,
+                min(mask1_col_min, mask2_col_min, mask3_col_min) - 50,
                 0
             )
             mask_R_boundary = min(
-                max(mask1_width_max, mask2_width_max, mask3_width_max) + 50,
+                max(mask1_col_max, mask2_col_max, mask3_col_max) + 50,
                 frame_cols
             )
             mask_T_boundary = max(
-                min(mask1_height_min, mask2_height_min, mask3_height_min) - 50,
+                min(mask1_row_min, mask2_row_min, mask3_row_min) - 50,
                 0
             )
             mask_B_boundary = min(
-                max(mask1_height_max, mask2_height_max, mask3_height_max) + 50,
+                max(mask1_row_max, mask2_row_max, mask3_row_max) + 50,
                 frame_rows
             )
 
-            # region of interest in frames
+            # search areas in frames
             cropped_frame1 = frame1[mask_T_boundary:mask_B_boundary,
                                     mask_L_boundary:mask_R_boundary]
             cropped_frame2 = frame2[mask_T_boundary:mask_B_boundary,
@@ -249,19 +362,57 @@ if __name__ == '__main__':
             u2 = opt2[:, :, 0]
             v2 = opt2[:, :, 1]
 
-            # for each pixel in the cropped mask
-            # TODO: optimise with vectorisation
-            for i in range(mask_T_boundary, mask_B_boundary):
-                for j in range(mask_L_boundary, mask_R_boundary):
+            # pad the velocity fields (outside search area) with 0's to have the same size as the frame again
+            u1 = np.pad(u1, ((mask_T_boundary, frame_rows-mask_B_boundary),
+                        (mask_L_boundary, frame_cols-mask_R_boundary)), 'constant', constant_values=0)
+            v1 = np.pad(v1, ((mask_T_boundary, frame_rows-mask_B_boundary),
+                        (mask_L_boundary, frame_cols-mask_R_boundary)), 'constant', constant_values=0)
+            u2 = np.pad(u2, ((mask_T_boundary, frame_rows-mask_B_boundary),
+                        (mask_L_boundary, frame_cols-mask_R_boundary)), 'constant', constant_values=0)
+            v2 = np.pad(v2, ((mask_T_boundary, frame_rows-mask_B_boundary),
+                        (mask_L_boundary, frame_cols-mask_R_boundary)), 'constant', constant_values=0)
 
-                    # compute horizontal and vertical acceleration (for one pixel)
-                    acc_u = u2[i, j] + u1[i, j]
-                    acc_v = v2[i, j] + v1[i, j]
+            # draw and save quiver plot of velocity field (between second and third frame, on third frame)
+            vel_viz_arr = draw_arrows(frame3, flow=np.stack([u2, v2], axis=-1))
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/{frame_i+2:06d}_vel_arr.png', vel_viz_arr)
 
-                    # compute magnitude of acceleration vector
-                    acc_mag = np.sqrt(acc_u**2 + acc_v**2)
+            # draw and save hsv plot of velocity field
+            vel_viz_hsv = draw_hsv(flow=np.stack([u2, v2], axis=-1))
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/{frame_i+2:06d}_vel_hsv.png', vel_viz_hsv)
 
-                    if acc_mag > ACC_MAGNITUDE_THRESHOLD:
-                        radial_i, radial_j, tangential_i, tangential_j, O_i, O_j = calc_tan_rad(mask_rows, mask_cols, i, j,
-                                                                                                u1[i, j], v1[i, j], u2[i, j], v2[i, j])
-                        pass
+            # # for each pixel in the search area
+            # # TODO: optimise with vectorisation
+            # for i in range(mask_T_boundary, mask_B_boundary):
+            #     for j in range(mask_L_boundary, mask_R_boundary):
+
+            #         # compute horizontal and vertical acceleration (for one pixel)
+            #         acc_u = u2[i, j] + u1[i, j]
+            #         acc_v = v2[i, j] + v1[i, j]
+
+            #         # compute magnitude of acceleration vector
+            #         acc_mag = np.sqrt(acc_u**2 + acc_v**2)
+
+            #         # if magnitude of acceleration vector is large enough
+            #         if acc_mag > ACC_MAGNITUDE_THRESHOLD:
+            #             # calculate radial and tangential acceleration, and circle centre
+            #             radial_i, radial_j, tangential_i, tangential_j, O_i, O_j = calc_tan_rad(mask_rows, mask_cols, i, j,
+            #                                                                                     u1[i, j], v1[i, j], u2[i, j], v2[i, j])
+            #             # TODO: ??
+            #             radial_u = radial_j - j
+            #             radial_v = radial_i - i
+
+            #             # calculate magnitude of radial acceleration
+            #             radial_magnitude = np.sqrt(radial_u**2 + radial_v**2)
+
+            #             # if radial magnitude is large enough and TODO
+            #             if radial_magnitude > ACC_MAGNITUDE_THRESHOLD and i < radial_i and j > radial_j:
+            #                 # TODO
+            #                 radial_u = round(radial_u)
+            #                 radial_v = round(radial_v)
+
+            #                 #flow = draw_flow(480, 640, i+mask_T_boundary, j+mask_L_boundary, radial_u, radial_v, flow)
+            #                 #cv2.imwrite(filename, img)
+
+            # flow.save(f'{OUTPUT_DIR}{seq_id}{frame_i}.png')
