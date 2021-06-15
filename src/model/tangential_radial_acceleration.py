@@ -321,6 +321,7 @@ if __name__ == '__main__':
             # creates object to compute optical flow by DeepFlow method
             # TODO: replace with DeepFlow2 and use RBG cropped_frameX
             opt_flow = cv2.optflow.createOptFlow_DeepFlow()
+            # d = np.load('test3.npy')
 
             # velocity field V(t ~ t-∆t)
             opt1 = opt_flow.calc(
@@ -398,9 +399,9 @@ if __name__ == '__main__':
             # draw and save radial acceleration
             acc_viz_rad = draw_arrows(frame3, flow=radial)
             cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/radial/{frame_i+2:06d}.png', acc_viz_rad)
+                f'{OUTPUT_DIR}{seq_id}/radial/{frame_i+2:06d}.png', acc_viz_rad.round())
 
             # draw and save tangential acceleration
             acc_viz_tan = draw_arrows(frame3, flow=tangential)
             cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/tangential/{frame_i+2:06d}.png', acc_viz_tan)
+                f'{OUTPUT_DIR}{seq_id}/tangential/{frame_i+2:06d}.png', acc_viz_tan.round())
