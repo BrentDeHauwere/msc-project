@@ -1,7 +1,8 @@
 # %%
+import glob
 import os
-import cv2
 
+import cv2
 import numpy as np
 from numpy.core.fromnumeric import sort
 from numpy.linalg import inv
@@ -143,30 +144,6 @@ def calc_tan_rad(mask_rows, mask_cols, i, j, u1, v1, u2, v2):
     return radial_i, radial_j, tangential_i, tangential_j, O_i, O_j
 
 
-def draw_flow(u, v, flow_array, step=1, scale=1, thres=1):
-    if len(flow_array.shape) == 2:
-        flow_array = np.dstack((flow_array, flow_array, flow_array))
-
-    flow_img = Image.fromarray(flow_array)
-    draw = ImageDraw.Draw(flow_img)
-
-    for x in range(1, flow_array.shape[1], step):
-        for y in range(1, flow_array.shape[0], step):
-            dx = int(round(u[int(y), int(x)]))
-            dy = int(round(v[int(y), int(x)]))
-
-            if np.sqrt(dx**2 + dy**2) > thres:
-                end_x = x + scale*dx
-                end_y = y + scale*dy
-
-                if 0 <= end_y < flow_array.shape[0] and 0 <= end_x < flow_array.shape[1]:
-                    draw.line((x, y, end_x, end_y),
-                              fill=(255, 255, 255), width=2)
-
-    del draw
-    return flow_img
-
-
 def draw_arrows(img, flow, step=10):
     """Draws a quiver plot. The flow field is visualized by an arrows which start at the initial position points and ends at the new position points, given the displacement.
     Hence, the length of the arrow indicates the magnitude of the displacement.
@@ -198,10 +175,8 @@ def draw_arrows(img, flow, step=10):
     # round floating point numbers
     lines = np.int32(lines + 0.5)
 
-    # replaces all B, G, R channels with the gray value Y, so B=Y, G=Y, R=Y
-    # it converts a single channel image to multichannel by replicating
+    # converts RBG to BGR (opencv's default)
     vis = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    # vis = Image.fromarray(img, mode='RGB')
 
     # colour to use for drawing
     ARROW_COLOUR = (0, 0, 255)
@@ -253,18 +228,23 @@ def draw_hsv(flow):
 
 
 if __name__ == '__main__':
-    # iterate over each sequence
-    for dirpath, dirnames, filenames in os.walk(INPUT_SEQUENCES_DIR):
+    # iterate over each sequence (represented by a directory)
+    for seq_id in [x for x in os.listdir(INPUT_SEQUENCES_DIR) if os.path.isdir(INPUT_SEQUENCES_DIR + x)]:
 
-        # id of the sequence video
-        seq_id = os.path.basename(dirpath)
+        # create output directories if don't exist
+        dirs = ['',
+                'velocity_quiver',
+                'velocity_hsv',
+                'acceleration',
+                'radial',
+                'tangential']
+        [os.mkdir(f'{OUTPUT_DIR}{seq_id}/{x}')
+         for x in dirs if not os.path.exists(f'{OUTPUT_DIR}{seq_id}/{x}')]
 
-        # create output directory if doesn't exist
-        if not os.path.exists(OUTPUT_DIR + seq_id):
-            os.mkdir(OUTPUT_DIR + seq_id)
-
-        # sort sequence frames
-        frames = sort(filenames)
+        # retrieve frame filenames and sort
+        frames = [os.path.basename(x) for x in glob.glob(
+            f'{INPUT_SEQUENCES_DIR}{seq_id}/*.png')]
+        frames.sort()
 
         # iterative over all frames
         for frame_i in tqdm(range(len(frames) - 2), desc=seq_id):
@@ -372,47 +352,53 @@ if __name__ == '__main__':
             v2 = np.pad(v2, ((mask_T_boundary, frame_rows-mask_B_boundary),
                         (mask_L_boundary, frame_cols-mask_R_boundary)), 'constant', constant_values=0)
 
+            # compute horizontal and vertical acceleration
+            acc_u = u2 + u1
+            acc_v = v2 + v1
+
+            #  array to store tangential and radial acceleration in each pixel
+            radial = np.zeros((frame_rows, frame_cols, 2))
+            tangential = np.zeros((frame_rows, frame_cols, 2))
+
+            # for each pixel in the search area, calculate the radial acceleration
+            # TODO: optimise with vectorisation
+            for i in range(mask_T_boundary, mask_B_boundary):
+                for j in range(mask_L_boundary, mask_R_boundary):
+
+                    # compute magnitude of acceleration vector (for one pixel)
+                    acc_mag = np.sqrt(acc_u[i, j]**2 + acc_v[i, j]**2)
+
+                    # if magnitude of acceleration vector is large enough
+                    if acc_mag > ACC_MAGNITUDE_THRESHOLD:
+                        # calculate radial and tangential acceleration, and circle centre
+                        radial_i, radial_j, tangential_i, tangential_j, O_i, O_j = calc_tan_rad(mask_rows, mask_cols, i, j,
+                                                                                                u1[i, j], v1[i, j], u2[i, j], v2[i, j])
+                        radial[i, j, 0] = radial_j - j
+                        radial[i, j, 1] = radial_i - i
+                        tangential[i, j, 0] = tangential_j - j
+                        tangential[i, j, 1] = tangential_i - i
+
             # draw and save quiver plot of velocity field (between second and third frame, on third frame)
             vel_viz_arr = draw_arrows(frame3, flow=np.stack([u2, v2], axis=-1))
             cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/{frame_i+2:06d}_vel_arr.png', vel_viz_arr)
+                f'{OUTPUT_DIR}{seq_id}/velocity_quiver/{frame_i+2:06d}.png', vel_viz_arr)
 
             # draw and save hsv plot of velocity field
             vel_viz_hsv = draw_hsv(flow=np.stack([u2, v2], axis=-1))
             cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/{frame_i+2:06d}_vel_hsv.png', vel_viz_hsv)
+                f'{OUTPUT_DIR}{seq_id}/velocity_hsv/{frame_i+2:06d}.png', vel_viz_hsv)
 
-            # # for each pixel in the search area
-            # # TODO: optimise with vectorisation
-            # for i in range(mask_T_boundary, mask_B_boundary):
-            #     for j in range(mask_L_boundary, mask_R_boundary):
+            # draw and save acceleration field
+            acc_viz = draw_hsv(flow=np.stack([acc_u, acc_v], axis=-1))
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/acceleration/{frame_i+2:06d}.png', acc_viz)
 
-            #         # compute horizontal and vertical acceleration (for one pixel)
-            #         acc_u = u2[i, j] + u1[i, j]
-            #         acc_v = v2[i, j] + v1[i, j]
+            # draw and save radial acceleration
+            acc_viz_rad = draw_arrows(frame3, flow=radial)
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/radial/{frame_i+2:06d}.png', acc_viz_rad)
 
-            #         # compute magnitude of acceleration vector
-            #         acc_mag = np.sqrt(acc_u**2 + acc_v**2)
-
-            #         # if magnitude of acceleration vector is large enough
-            #         if acc_mag > ACC_MAGNITUDE_THRESHOLD:
-            #             # calculate radial and tangential acceleration, and circle centre
-            #             radial_i, radial_j, tangential_i, tangential_j, O_i, O_j = calc_tan_rad(mask_rows, mask_cols, i, j,
-            #                                                                                     u1[i, j], v1[i, j], u2[i, j], v2[i, j])
-            #             # TODO: ??
-            #             radial_u = radial_j - j
-            #             radial_v = radial_i - i
-
-            #             # calculate magnitude of radial acceleration
-            #             radial_magnitude = np.sqrt(radial_u**2 + radial_v**2)
-
-            #             # if radial magnitude is large enough and TODO
-            #             if radial_magnitude > ACC_MAGNITUDE_THRESHOLD and i < radial_i and j > radial_j:
-            #                 # TODO
-            #                 radial_u = round(radial_u)
-            #                 radial_v = round(radial_v)
-
-            #                 #flow = draw_flow(480, 640, i+mask_T_boundary, j+mask_L_boundary, radial_u, radial_v, flow)
-            #                 #cv2.imwrite(filename, img)
-
-            # flow.save(f'{OUTPUT_DIR}{seq_id}{frame_i}.png')
+            # draw and save tangential acceleration
+            acc_viz_tan = draw_arrows(frame3, flow=tangential)
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/tangential/{frame_i+2:06d}.png', acc_viz_tan)
