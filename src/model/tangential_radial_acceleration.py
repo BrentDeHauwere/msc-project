@@ -373,6 +373,8 @@ if __name__ == '__main__':
                         # calculate radial and tangential acceleration, and circle centre
                         radial_i, radial_j, tangential_i, tangential_j, O_i, O_j = calc_tan_rad(mask_rows, mask_cols, i, j,
                                                                                                 u1[i, j], v1[i, j], u2[i, j], v2[i, j])
+
+                        # save radial and tangential acceleration in designated array
                         radial[i, j, 0] = radial_j - j
                         radial[i, j, 1] = radial_i - i
                         tangential[i, j, 0] = tangential_j - j
