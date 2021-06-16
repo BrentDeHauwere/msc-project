@@ -11,9 +11,12 @@ from tqdm import tqdm
 
 INPUT_SEQUENCES_DIR = 'data/processed/sequences/'
 INPUT_SILHOUETTES_DIR = 'data/raw/silhouettes/'
+INPUT_FLOW_DIR = 'data/processed/flow/'
 OUTPUT_DIR = 'data/results/'
+FLAG_DEEPFLOW2 = True
 
 ACC_MAGNITUDE_THRESHOLD = 1
+SCALE_MAGNITUDE = 3
 
 
 def circle_centre(x1, y1, x2, y2, x3, y3):
@@ -233,11 +236,14 @@ if __name__ == '__main__':
 
         # create output directories if don't exist
         dirs = ['',
-                'velocity_quiver',
+                'velocity',
                 'velocity_hsv',
                 'acceleration',
+                'acceleration_hsv',
                 'radial',
-                'tangential']
+                'radial_hsv',
+                'tangential',
+                'tangential_hsv']
         [os.mkdir(f'{OUTPUT_DIR}{seq_id}/{x}')
          for x in dirs if not os.path.exists(f'{OUTPUT_DIR}{seq_id}/{x}')]
 
@@ -260,98 +266,123 @@ if __name__ == '__main__':
             # obtain frame dimensions
             frame_rows, frame_cols, frame_dims = frame1.shape
 
-            # retrieve corresponding silhouettes (NOTE: 0-1 scale)
-            mask1 = np.array(Image.open(
-                f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i]}'), dtype=float)
-            mask2 = np.array(Image.open(
-                f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i+1]}'), dtype=float)
-            mask3 = np.array(Image.open(
-                f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i+2]}'), dtype=float)
+            # if silhouettes are provided (look for first), create a mask
+            if os.path.isfile(f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i]}'):
 
-            # obtain mask dimensions
-            mask_rows, mask_cols = mask1.shape
+                # retrieve corresponding silhouettes (NOTE: 0-1 scale)
+                mask1 = np.array(Image.open(
+                    f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i]}'), dtype=float)
+                mask2 = np.array(Image.open(
+                    f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i+1]}'), dtype=float)
+                mask3 = np.array(Image.open(
+                    f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i+2]}'), dtype=float)
 
-            # obtain coordinates of mask (where intensity is 1)
-            mask_coords1 = np.argwhere(mask1 == 1)
-            mask_coords2 = np.argwhere(mask2 == 1)
-            mask_coords3 = np.argwhere(mask3 == 1)
+                # obtain mask dimensions
+                mask_rows, mask_cols = mask1.shape
 
-            # calculate dimensions of each mask
-            mask1_row_min = min(mask_coords1[:, 0])
-            mask1_row_max = max(mask_coords1[:, 0])
-            mask1_col_min = min(mask_coords1[:, 1])
-            mask1_col_max = max(mask_coords1[:, 1])
+                # obtain coordinates of mask (where intensity is 1)
+                mask_coords1 = np.argwhere(mask1 == 1)
+                mask_coords2 = np.argwhere(mask2 == 1)
+                mask_coords3 = np.argwhere(mask3 == 1)
 
-            mask2_row_min = min(mask_coords2[:, 0])
-            mask2_row_max = max(mask_coords2[:, 0])
-            mask2_col_min = min(mask_coords2[:, 1])
-            mask2_col_max = max(mask_coords2[:, 1])
+                # calculate dimensions of each mask
+                mask1_row_min = min(mask_coords1[:, 0])
+                mask1_row_max = max(mask_coords1[:, 0])
+                mask1_col_min = min(mask_coords1[:, 1])
+                mask1_col_max = max(mask_coords1[:, 1])
 
-            mask3_row_min = min(mask_coords3[:, 0])
-            mask3_row_max = max(mask_coords3[:, 0])
-            mask3_col_min = min(mask_coords3[:, 1])
-            mask3_col_max = max(mask_coords3[:, 1])
+                mask2_row_min = min(mask_coords2[:, 0])
+                mask2_row_max = max(mask_coords2[:, 0])
+                mask2_col_min = min(mask_coords2[:, 1])
+                mask2_col_max = max(mask_coords2[:, 1])
 
-            # calculate the union dimensions of the three masks (clip at 0 and frame_rows/cols)
-            mask_L_boundary = max(
-                min(mask1_col_min, mask2_col_min, mask3_col_min) - 50,
-                0
-            )
-            mask_R_boundary = min(
-                max(mask1_col_max, mask2_col_max, mask3_col_max) + 50,
-                frame_cols
-            )
-            mask_T_boundary = max(
-                min(mask1_row_min, mask2_row_min, mask3_row_min) - 50,
-                0
-            )
-            mask_B_boundary = min(
-                max(mask1_row_max, mask2_row_max, mask3_row_max) + 50,
-                frame_rows
-            )
+                mask3_row_min = min(mask_coords3[:, 0])
+                mask3_row_max = max(mask_coords3[:, 0])
+                mask3_col_min = min(mask_coords3[:, 1])
+                mask3_col_max = max(mask_coords3[:, 1])
 
-            # search areas in frames
-            cropped_frame1 = frame1[mask_T_boundary:mask_B_boundary,
-                                    mask_L_boundary:mask_R_boundary]
-            cropped_frame2 = frame2[mask_T_boundary:mask_B_boundary,
-                                    mask_L_boundary:mask_R_boundary]
-            cropped_frame3 = frame3[mask_T_boundary:mask_B_boundary,
-                                    mask_L_boundary:mask_R_boundary]
+                # calculate the union dimensions of the three masks (clip at 0 and frame_rows/cols)
+                mask_L_boundary = max(
+                    min(mask1_col_min, mask2_col_min, mask3_col_min) - 50,
+                    0
+                )
+                mask_R_boundary = min(
+                    max(mask1_col_max, mask2_col_max, mask3_col_max) + 50,
+                    frame_cols
+                )
+                mask_T_boundary = max(
+                    min(mask1_row_min, mask2_row_min, mask3_row_min) - 50,
+                    0
+                )
+                mask_B_boundary = min(
+                    max(mask1_row_max, mask2_row_max, mask3_row_max) + 50,
+                    frame_rows
+                )
 
-            # creates object to compute optical flow by DeepFlow method
-            # TODO: replace with DeepFlow2 and use RBG cropped_frameX
-            opt_flow = cv2.optflow.createOptFlow_DeepFlow()
-            # d = np.load('test3.npy')
+            # otherwise, compute flows for entire images
+            else:
 
-            # velocity field V(t ~ t-∆t)
-            opt1 = opt_flow.calc(
-                cv2.cvtColor(cropped_frame2, cv2.COLOR_BGR2GRAY),
-                cv2.cvtColor(cropped_frame1, cv2.COLOR_BGR2GRAY),
-                None
-            )
+                # mask boundaries = frame boundaries
+                mask_L_boundary = 0
+                mask_R_boundary = frame_cols
+                mask_T_boundary = 0
+                mask_B_boundary = frame_rows
 
-            # velocity field V(t ~ t+∆t)
-            opt2 = opt_flow.calc(
-                cv2.cvtColor(cropped_frame2, cv2.COLOR_BGR2GRAY),
-                cv2.cvtColor(cropped_frame3, cv2.COLOR_BGR2GRAY),
-                None
-            )
+                # mask dimensions = frame dimensions
+                mask_rows, mask_cols, _ = frame1.shape
 
-            # horizontal (dx) and vertical (dy) displacement (~velocity field)
-            u1 = opt1[:, :, 0]
-            v1 = opt1[:, :, 1]
-            u2 = opt2[:, :, 0]
-            v2 = opt2[:, :, 1]
+            # indicates whether flow is already computed with deepflow2
+            if FLAG_DEEPFLOW2 == False:
 
-            # pad the velocity fields (outside search area) with 0's to have the same size as the frame again
-            u1 = np.pad(u1, ((mask_T_boundary, frame_rows-mask_B_boundary),
-                        (mask_L_boundary, frame_cols-mask_R_boundary)), 'constant', constant_values=0)
-            v1 = np.pad(v1, ((mask_T_boundary, frame_rows-mask_B_boundary),
-                        (mask_L_boundary, frame_cols-mask_R_boundary)), 'constant', constant_values=0)
-            u2 = np.pad(u2, ((mask_T_boundary, frame_rows-mask_B_boundary),
-                        (mask_L_boundary, frame_cols-mask_R_boundary)), 'constant', constant_values=0)
-            v2 = np.pad(v2, ((mask_T_boundary, frame_rows-mask_B_boundary),
-                        (mask_L_boundary, frame_cols-mask_R_boundary)), 'constant', constant_values=0)
+                # search areas in frames
+                cropped_frame1 = frame1[mask_T_boundary:mask_B_boundary,
+                                        mask_L_boundary:mask_R_boundary]
+                cropped_frame2 = frame2[mask_T_boundary:mask_B_boundary,
+                                        mask_L_boundary:mask_R_boundary]
+                cropped_frame3 = frame3[mask_T_boundary:mask_B_boundary,
+                                        mask_L_boundary:mask_R_boundary]
+
+                # creates object to compute optical flow by DeepFlow method, version 1
+                opt_flow = cv2.optflow.createOptFlow_DeepFlow()
+
+                # velocity field V(t ~ t-∆t)
+                opt1 = opt_flow.calc(
+                    cv2.cvtColor(cropped_frame2, cv2.COLOR_BGR2GRAY),
+                    cv2.cvtColor(cropped_frame1, cv2.COLOR_BGR2GRAY),
+                    None
+                )
+
+                # velocity field V(t ~ t+∆t)
+                opt2 = opt_flow.calc(
+                    cv2.cvtColor(cropped_frame2, cv2.COLOR_BGR2GRAY),
+                    cv2.cvtColor(cropped_frame3, cv2.COLOR_BGR2GRAY),
+                    None
+                )
+
+                # horizontal (dx) and vertical (dy) displacement (~velocity field)
+                # pad the velocity fields (outside search area) with 0's to have the same size as the frame again
+                u1 = np.pad(opt1[:, :, 0], ((mask_T_boundary, frame_rows-mask_B_boundary),
+                                            (mask_L_boundary, frame_cols-mask_R_boundary)), 'constant', constant_values=0)
+                v1 = np.pad(opt1[:, :, 1], ((mask_T_boundary, frame_rows-mask_B_boundary),
+                                            (mask_L_boundary, frame_cols-mask_R_boundary)), 'constant', constant_values=0)
+                u2 = np.pad(opt2[:, :, 0], ((mask_T_boundary, frame_rows-mask_B_boundary),
+                                            (mask_L_boundary, frame_cols-mask_R_boundary)), 'constant', constant_values=0)
+                v2 = np.pad(opt2[:, :, 1], ((mask_T_boundary, frame_rows-mask_B_boundary),
+                                            (mask_L_boundary, frame_cols-mask_R_boundary)), 'constant', constant_values=0)
+
+            else:
+
+                # velocity field V(t ~ t-∆t) and V(t ~ t+∆t), computed by DeepFlow2
+                opt1 = np.load(
+                    f'{INPUT_FLOW_DIR}{seq_id}/{frame_i+1:06d}_{frame_i:06d}.npy')
+                opt2 = np.load(
+                    f'{INPUT_FLOW_DIR}{seq_id}/{frame_i+1:06d}_{frame_i+2:06d}.npy')
+
+                # horizontal (dx) and vertical (dy) displacement (~velocity field)
+                u1 = opt1[:, :, 0]
+                v1 = opt1[:, :, 1]
+                u2 = opt2[:, :, 0]
+                v2 = opt2[:, :, 1]
 
             # compute horizontal and vertical acceleration
             acc_u = u2 + u1
@@ -381,27 +412,36 @@ if __name__ == '__main__':
                         tangential[i, j, 0] = tangential_j - j
                         tangential[i, j, 1] = tangential_i - i
 
-            # draw and save quiver plot of velocity field (between second and third frame, on third frame)
-            vel_viz_arr = draw_arrows(frame3, flow=np.stack([u2, v2], axis=-1))
-            cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/velocity_quiver/{frame_i+2:06d}.png', vel_viz_arr)
+            # draw plots (and scale magnitude to make arrows more visible)
+            vel_viz_hsv = draw_hsv(flow=np.stack(
+                [u2, v2], axis=-1)*SCALE_MAGNITUDE)
+            acc_viz_hsv = draw_hsv(flow=np.stack(
+                [acc_u, acc_v], axis=-1)*SCALE_MAGNITUDE)
+            rad_viz_hsv = draw_hsv(flow=radial*SCALE_MAGNITUDE)
+            tan_viz_hsv = draw_hsv(flow=tangential*SCALE_MAGNITUDE)
 
-            # draw and save hsv plot of velocity field
-            vel_viz_hsv = draw_hsv(flow=np.stack([u2, v2], axis=-1))
+            vel_viz = draw_arrows(frame3, flow=np.stack(
+                [u2, v2], axis=-1)*SCALE_MAGNITUDE)
+            acc_viz = draw_arrows(
+                frame3, flow=np.stack([acc_u, acc_v], axis=-1)*SCALE_MAGNITUDE)
+            rad_viz = draw_arrows(frame3, flow=radial*SCALE_MAGNITUDE)
+            tan_viz = draw_arrows(frame3, flow=tangential*SCALE_MAGNITUDE)
+
+            # save plots
             cv2.imwrite(
                 f'{OUTPUT_DIR}{seq_id}/velocity_hsv/{frame_i+2:06d}.png', vel_viz_hsv)
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/acceleration_hsv/{frame_i+2:06d}.png', acc_viz_hsv)
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/radial_hsv/{frame_i+2:06d}.png', rad_viz_hsv)
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/tangential_hsv/{frame_i+2:06d}.png', tan_viz_hsv)
 
-            # draw and save acceleration field
-            acc_viz = draw_hsv(flow=np.stack([acc_u, acc_v], axis=-1))
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/velocity/{frame_i+2:06d}.png', vel_viz)
             cv2.imwrite(
                 f'{OUTPUT_DIR}{seq_id}/acceleration/{frame_i+2:06d}.png', acc_viz)
-
-            # draw and save radial acceleration
-            acc_viz_rad = draw_arrows(frame3, flow=radial)
             cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/radial/{frame_i+2:06d}.png', acc_viz_rad.round())
-
-            # draw and save tangential acceleration
-            acc_viz_tan = draw_arrows(frame3, flow=tangential)
+                f'{OUTPUT_DIR}{seq_id}/radial/{frame_i+2:06d}.png', rad_viz)
             cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/tangential/{frame_i+2:06d}.png', acc_viz_tan.round())
+                f'{OUTPUT_DIR}{seq_id}/tangential/{frame_i+2:06d}.png', tan_viz)
