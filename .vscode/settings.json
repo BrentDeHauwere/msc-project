@@ -1,3 +1,4 @@
 {
-    "jupyter.notebookFileRoot": "${workspaceFolder}"
+    "jupyter.notebookFileRoot": "${workspaceFolder}",
+    "python.pythonPath": "/Users/BrentDeHauwere/opt/anaconda3/envs/py39/bin/python"
 }

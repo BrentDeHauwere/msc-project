@@ -1,22 +1,33 @@
 # %%
 import glob
+import json
+import math
 import os
 
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 from numpy.core.fromnumeric import sort
 from numpy.linalg import inv
 from PIL import Image, ImageDraw
+from sklearn.linear_model import LinearRegression
 from tqdm import tqdm
 
 INPUT_SEQUENCES_DIR = 'data/processed/sequences/'
 INPUT_SILHOUETTES_DIR = 'data/raw/silhouettes/'
+INPUT_SEGMENTATION_DIR = 'data/processed/segmentation/'
+INPUT_POSE_ESTIMATION_DIR = 'data/processed/pose_estimation/'
 INPUT_FLOW_DIR = 'data/processed/flow/'
 OUTPUT_DIR = 'data/results/'
 FLAG_DEEPFLOW2 = True
 
 ACC_MAGNITUDE_THRESHOLD = 1
-SCALE_MAGNITUDE = 3
+SCALE_MAGNITUDE = 1
+
+LTHIGH_SEGMENT_COLOUR = [0, 255, 0]  # BGR
+POINT_LTHIGH = 12
+POINT_LKNEE = 13
 
 
 def circle_centre(x1, y1, x2, y2, x3, y3):
@@ -147,6 +158,35 @@ def calc_tan_rad(mask_rows, mask_cols, i, j, u1, v1, u2, v2):
     return radial_i, radial_j, tangential_i, tangential_j, O_i, O_j
 
 
+def calc_cos_thigh(seq_id, frame_id):
+
+    with open(f'{INPUT_POSE_ESTIMATION_DIR}{seq_id}/{frame_id}_keypoints.json') as json_file:
+        data = json.load(json_file)
+
+    assert len(data['people']) == 1
+
+    x_lthigh = data['people'][0]['pose_keypoints_2d'][POINT_LTHIGH*3]
+    y_lthigh = data['people'][0]['pose_keypoints_2d'][POINT_LTHIGH*3 + 1]
+    c_lthigh = data['people'][0]['pose_keypoints_2d'][POINT_LTHIGH*3 + 2]
+    print(x_lthigh, y_lthigh, c_lthigh)
+
+    x_lknee = data['people'][0]['pose_keypoints_2d'][POINT_LKNEE*3]
+    y_lknee = data['people'][0]['pose_keypoints_2d'][POINT_LKNEE*3 + 1]
+    c_lknee = data['people'][0]['pose_keypoints_2d'][POINT_LKNEE*3 + 2]
+    print(x_lknee, y_lknee, c_lknee)
+
+    # angle in rad (- because x-axis is inverted)
+    m = - math.atan2(y_lthigh-y_lknee, x_lthigh-x_lknee)
+
+    # angle in degrees
+    theta = math.degrees(m)
+
+    # cosinus of angle (between thigh and x-axis)
+    cos_theta = math.cos(m)
+
+    return cos_theta
+
+
 def draw_arrows(img, flow, step=10):
     """Draws a quiver plot. The flow field is visualized by an arrows which start at the initial position points and ends at the new position points, given the displacement.
     Hence, the length of the arrow indicates the magnitude of the displacement.
@@ -194,7 +234,7 @@ def draw_arrows(img, flow, step=10):
     return vis
 
 
-def draw_hsv(flow):
+def draw_hsv(frame, flow):
     """Draws the optical flow field using the HSV colour space
 
     :param flow: optical flow field
@@ -225,9 +265,21 @@ def draw_hsv(flow):
     hsv[..., 2] = cv2.normalize(magnitude, None, 0, 255, cv2.NORM_MINMAX)
 
     # converts HSV (hue saturation value) to BGR (RGB) colour space/representation
-    bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+    mask_bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
-    return bgr
+    # converts RGB TO BGR (opencv default)
+    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+    # linearly blend the hsv mask and the frame
+    outp = cv2.addWeighted(mask_bgr, 0.8, frame_bgr, 0.2, 0)
+
+    return outp
+
+
+def _show_image(img, title):
+    cv2.imshow(title, img)
+    cv2.waitKey(0)
+    plt.show()
 
 
 if __name__ == '__main__':
@@ -252,6 +304,12 @@ if __name__ == '__main__':
             f'{INPUT_SEQUENCES_DIR}{seq_id}/*.png')]
         frames.sort()
 
+        # extract basename from frame filenames
+        frames_basename = [os.path.splitext(f)[0] for f in frames]
+
+        # array to save average acceleration in thigh per frame
+        rad_acc_avg_arr = []
+
         # iterative over all frames
         for frame_i in tqdm(range(len(frames) - 2), desc=seq_id):
 
@@ -271,11 +329,11 @@ if __name__ == '__main__':
 
                 # retrieve corresponding silhouettes (NOTE: 0-1 scale)
                 mask1 = np.array(Image.open(
-                    f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i]}'), dtype=float)
+                    f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i]}'), dtype=np.float32)  # opencv does not support float64 (default numpy)
                 mask2 = np.array(Image.open(
-                    f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i+1]}'), dtype=float)
+                    f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i+1]}'), dtype=np.float32)
                 mask3 = np.array(Image.open(
-                    f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i+2]}'), dtype=float)
+                    f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i+2]}'), dtype=np.float32)
 
                 # obtain mask dimensions
                 mask_rows, mask_cols = mask1.shape
@@ -319,6 +377,34 @@ if __name__ == '__main__':
                     frame_rows
                 )
 
+                # load corresponding segmentation files
+                segm_arr1 = np.load(
+                    f'{INPUT_SEGMENTATION_DIR}{seq_id}/{frames_basename[frame_i]}.npy')
+                segm_arr2 = np.load(
+                    f'{INPUT_SEGMENTATION_DIR}{seq_id}/{frames_basename[frame_i+1]}.npy')
+                segm_arr3 = np.load(
+                    f'{INPUT_SEGMENTATION_DIR}{seq_id}/{frames_basename[frame_i+2]}.npy')
+
+                # only retain the segmentation of the thigh (returns 0 or 255)
+                segm_mask1 = cv2.inRange(segm_arr1, tuple(LTHIGH_SEGMENT_COLOUR),
+                                         tuple(LTHIGH_SEGMENT_COLOUR))
+                segm_mask2 = cv2.inRange(segm_arr2, tuple(LTHIGH_SEGMENT_COLOUR),
+                                         tuple(LTHIGH_SEGMENT_COLOUR))
+                segm_mask3 = cv2.inRange(segm_arr3, tuple(LTHIGH_SEGMENT_COLOUR),
+                                         tuple(LTHIGH_SEGMENT_COLOUR))
+
+                # remove segmentation errors by filtering out what is out of the silhouette mask
+                mask_select = np.ones((mask_rows, mask_cols), bool)
+                mask_select[mask_T_boundary:mask_B_boundary,
+                            mask_L_boundary: mask_R_boundary] = 0
+                segm_mask1[mask_select] = 0
+                segm_mask2[mask_select] = 0
+                segm_mask3[mask_select] = 0
+
+                # _show_image(cv2.addWeighted(
+                #     cv2.cvtColor(segm_mask1, cv2.COLOR_GRAY2RGB), 0.6,
+                #     cv2.cvtColor(frame1, cv2.COLOR_RGB2BGR), 0.4, 0.0), 'mask_segm')
+
             # otherwise, compute flows for entire images
             else:
 
@@ -336,11 +422,11 @@ if __name__ == '__main__':
 
                 # search areas in frames
                 cropped_frame1 = frame1[mask_T_boundary:mask_B_boundary,
-                                        mask_L_boundary:mask_R_boundary]
-                cropped_frame2 = frame2[mask_T_boundary:mask_B_boundary,
-                                        mask_L_boundary:mask_R_boundary]
-                cropped_frame3 = frame3[mask_T_boundary:mask_B_boundary,
-                                        mask_L_boundary:mask_R_boundary]
+                                        mask_L_boundary: mask_R_boundary]
+                cropped_frame2 = frame2[mask_T_boundary: mask_B_boundary,
+                                        mask_L_boundary: mask_R_boundary]
+                cropped_frame3 = frame3[mask_T_boundary: mask_B_boundary,
+                                        mask_L_boundary: mask_R_boundary]
 
                 # creates object to compute optical flow by DeepFlow method, version 1
                 opt_flow = cv2.optflow.createOptFlow_DeepFlow()
@@ -412,36 +498,79 @@ if __name__ == '__main__':
                         tangential[i, j, 0] = tangential_j - j
                         tangential[i, j, 1] = tangential_i - i
 
-            # draw plots (and scale magnitude to make arrows more visible)
-            vel_viz_hsv = draw_hsv(flow=np.stack(
-                [u2, v2], axis=-1)*SCALE_MAGNITUDE)
-            acc_viz_hsv = draw_hsv(flow=np.stack(
-                [acc_u, acc_v], axis=-1)*SCALE_MAGNITUDE)
-            rad_viz_hsv = draw_hsv(flow=radial*SCALE_MAGNITUDE)
-            tan_viz_hsv = draw_hsv(flow=tangential*SCALE_MAGNITUDE)
+            # if segmentations are provided (look for first), analyse acceleration in thigh
+            if os.path.isfile(f'{INPUT_SEGMENTATION_DIR}{seq_id}/{frames[frame_i]}'):
+                rad_acc_avg_arr.append(np.mean(
+                    np.sqrt(
+                        radial[segm_mask2 == 255, 0]**2
+                        + radial[segm_mask2 == 255, 1]**2
+                    )
+                ))
 
-            vel_viz = draw_arrows(frame3, flow=np.stack(
+            # draw plots (and scale magnitude to make arrows more visible)
+            vel_viz_hsv = draw_hsv(frame2, flow=np.stack(
+                [u2, v2], axis=-1)*SCALE_MAGNITUDE)
+            acc_viz_hsv = draw_hsv(frame2, flow=np.stack(
+                [acc_u, acc_v], axis=-1)*SCALE_MAGNITUDE)
+            rad_viz_hsv = draw_hsv(frame2, flow=radial*SCALE_MAGNITUDE)
+            tan_viz_hsv = draw_hsv(frame2, flow=tangential*SCALE_MAGNITUDE)
+
+            vel_viz = draw_arrows(frame2, flow=np.stack(
                 [u2, v2], axis=-1)*SCALE_MAGNITUDE)
             acc_viz = draw_arrows(
-                frame3, flow=np.stack([acc_u, acc_v], axis=-1)*SCALE_MAGNITUDE)
-            rad_viz = draw_arrows(frame3, flow=radial*SCALE_MAGNITUDE)
-            tan_viz = draw_arrows(frame3, flow=tangential*SCALE_MAGNITUDE)
+                frame2, flow=np.stack([acc_u, acc_v], axis=-1)*SCALE_MAGNITUDE)
+            rad_viz = draw_arrows(frame2, flow=radial*SCALE_MAGNITUDE)
+            tan_viz = draw_arrows(frame2, flow=tangential*SCALE_MAGNITUDE)
 
             # save plots
             cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/velocity_hsv/{frame_i+2:06d}.png', vel_viz_hsv)
+                f'{OUTPUT_DIR}{seq_id}/velocity_hsv/{frame_i+1:06d}.png', vel_viz_hsv)
             cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/acceleration_hsv/{frame_i+2:06d}.png', acc_viz_hsv)
+                f'{OUTPUT_DIR}{seq_id}/acceleration_hsv/{frame_i+1:06d}.png', acc_viz_hsv)
             cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/radial_hsv/{frame_i+2:06d}.png', rad_viz_hsv)
+                f'{OUTPUT_DIR}{seq_id}/radial_hsv/{frame_i+1:06d}.png', rad_viz_hsv)
             cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/tangential_hsv/{frame_i+2:06d}.png', tan_viz_hsv)
+                f'{OUTPUT_DIR}{seq_id}/tangential_hsv/{frame_i+1:06d}.png', tan_viz_hsv)
 
             cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/velocity/{frame_i+2:06d}.png', vel_viz)
+                f'{OUTPUT_DIR}{seq_id}/velocity/{frame_i+1:06d}.png', vel_viz)
             cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/acceleration/{frame_i+2:06d}.png', acc_viz)
+                f'{OUTPUT_DIR}{seq_id}/acceleration/{frame_i+1:06d}.png', acc_viz)
             cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/radial/{frame_i+2:06d}.png', rad_viz)
+                f'{OUTPUT_DIR}{seq_id}/radial/{frame_i+1:06d}.png', rad_viz)
             cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/tangential/{frame_i+2:06d}.png', tan_viz)
+                f'{OUTPUT_DIR}{seq_id}/tangential/{frame_i+1:06d}.png', tan_viz)
+
+        # save average radial acceleration in thigh
+        np.save(f'{OUTPUT_DIR}{seq_id}_rad_thigh.npy',
+                np.array(rad_acc_avg_arr))
+
+        # plot average radial acceleration in thigh
+        sns.scatterplot(x=range(len(rad_acc_avg_arr)),
+                        y=rad_acc_avg_arr,
+                        label='subject ' + seq_id)
+
+    plt.title('Average Radial Acceleration in Thigh')
+    plt.xlabel('x')
+    plt.ylabel('avg radial acceleration (magnitude)')
+    plt.legend(loc='upper right')
+    plt.savefig(OUTPUT_DIR + 'plots/average_radial_acceleration_in_thigh')
+
+# %%
+rad_acc_avg_arr3 = np.load(
+    '/Users/BrentDeHauwere/Documents/Academic_Archive/MSc Artificial Intelligence/MSc Project/Implementation/msc-project/data/results/009a017s03L_rad_thigh.npy')
+rad_acc_avg_arr2 = np.load(
+    '/Users/BrentDeHauwere/Documents/Academic_Archive/MSc Artificial Intelligence/MSc Project/Implementation/msc-project/data/results/009a017s02L_rad_thigh.npy')
+
+sns.scatterplot(x=range(len(rad_acc_avg_arr3)),
+                y=rad_acc_avg_arr3,
+                label='subject ' + '009a017s03L')
+sns.scatterplot(x=range(len(rad_acc_avg_arr2)),
+                y=rad_acc_avg_arr2,
+                label='subject ' + '009a017s02L')
+
+plt.title('Average Radial Acceleration in Thigh')
+plt.xlabel('x')
+plt.ylabel('avg radial acceleration (magnitude)')
+plt.legend(loc='upper right')
+plt.savefig(OUTPUT_DIR + 'plots/average_radial_acceleration_in_thigh_')
