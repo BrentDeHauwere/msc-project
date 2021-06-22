@@ -22,6 +22,9 @@ INPUT_FLOW_DIR = 'data/processed/flow/'
 OUTPUT_DIR = 'data/results/'
 FLAG_DEEPFLOW2 = True
 
+FLAG_SILHOUETTES = None
+FLAG_SEGMENTATION = None
+
 ACC_MAGNITUDE_THRESHOLD = 1
 SCALE_MAGNITUDE = 1
 
@@ -57,8 +60,6 @@ def rotate(x, y, theta):
     rotated = np.array([[x, y, 1]]) @ rot_matrix
 
     return rotated[0, 0], rotated[0, 1]
-
-# TODO: ask for reason?
 
 
 def imageplane_to_cartesian(x, y, mask_rows, mask_cols):
@@ -300,64 +301,68 @@ if __name__ == '__main__':
          for x in dirs if not os.path.exists(f'{OUTPUT_DIR}{seq_id}/{x}')]
 
         # retrieve frame filenames and sort
-        frames = [os.path.basename(x) for x in glob.glob(
+        frames_fname = [os.path.basename(x) for x in glob.glob(
             f'{INPUT_SEQUENCES_DIR}{seq_id}/*.png')]
-        frames.sort()
+        frames_fname.sort()
 
         # extract basename from frame filenames
-        frames_basename = [os.path.splitext(f)[0] for f in frames]
+        frames_basename = [os.path.splitext(f)[0] for f in frames_fname]
+
+        # load frames
+        frames = [np.array(Image.open(
+            f'{INPUT_SEQUENCES_DIR}{seq_id}/{fn}')) for fn in frames_fname]
+
+        # obtain frame dimensions
+        frame_rows, frame_cols, frame_dims = frames[0].shape
+
+        # if provided (look for first), load masks (silhouettes)
+        if (FLAG_SILHOUETTES := os.path.isfile(f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames_fname[0]}')) \
+                and (FLAG_SEGMENTATION := os.path.isfile(f'{INPUT_SEGMENTATION_DIR}{seq_id}/{frames_basename[0]}.npy')):
+
+            # load corresponding silhouettes (note: 0-1 scale // opencv does not support float64, default numpy)
+            masks = [np.array(Image.open(f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{fn}'), dtype=np.float32)
+                     for fn in frames_fname]
+
+            # obtain mask dimensions
+            mask_rows, mask_cols = masks[0].shape
+
+            # obtain coordinates of mask (where intensity is 1 / white)
+            mask_coords = [np.argwhere(m == 1) for m in masks]
+
+            # calculate dimensions of each mask
+            mask_row_min = [min(mc[:, 0]) for mc in mask_coords]
+            mask_row_max = [max(mc[:, 0]) for mc in mask_coords]
+            mask_col_min = [min(mc[:, 1]) for mc in mask_coords]
+            mask_col_max = [max(mc[:, 1]) for mc in mask_coords]
+
+            # load corresponding segmentation files
+            segm_arr = [np.load(f'{INPUT_SEGMENTATION_DIR}{seq_id}/{fbn}.npy')
+                        for fbn in frames_basename]
+
+            # only retain the segmentation of the thigh (returns 0 or 255)
+            segm_mask = [cv2.inRange(sa, tuple(LTHIGH_SEGMENT_COLOUR),
+                                     tuple(LTHIGH_SEGMENT_COLOUR)) for sa in segm_arr]
 
         # array to save average acceleration in thigh per frame
         rad_acc_avg_arr = []
 
         # iterative over all frames
-        for frame_i in tqdm(range(len(frames) - 2), desc=seq_id):
+        for frame_i in tqdm(range(len(frames_fname) - 2), desc=seq_id):
 
             # retrieve next three frames (NOTE: 0-255 scale)
-            frame1 = np.array(Image.open(
-                f'{INPUT_SEQUENCES_DIR}{seq_id}/{frames[frame_i]}'))
-            frame2 = np.array(Image.open(
-                f'{INPUT_SEQUENCES_DIR}{seq_id}/{frames[frame_i+1]}'))
-            frame3 = np.array(Image.open(
-                f'{INPUT_SEQUENCES_DIR}{seq_id}/{frames[frame_i+2]}'))
-
-            # obtain frame dimensions
-            frame_rows, frame_cols, frame_dims = frame1.shape
+            frame1, frame2, frame3 = frames[frame_i:frame_i+3].copy()
 
             # if silhouettes are provided (look for first), create a mask
-            if os.path.isfile(f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i]}'):
+            if FLAG_SILHOUETTES and FLAG_SEGMENTATION:
 
-                # retrieve corresponding silhouettes (NOTE: 0-1 scale)
-                mask1 = np.array(Image.open(
-                    f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i]}'), dtype=np.float32)  # opencv does not support float64 (default numpy)
-                mask2 = np.array(Image.open(
-                    f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i+1]}'), dtype=np.float32)
-                mask3 = np.array(Image.open(
-                    f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames[frame_i+2]}'), dtype=np.float32)
+                # silhouettes
+                mask1, mask2, mask3 = masks[frame_i:frame_i+3].copy()
 
-                # obtain mask dimensions
-                mask_rows, mask_cols = mask1.shape
-
-                # obtain coordinates of mask (where intensity is 1)
-                mask_coords1 = np.argwhere(mask1 == 1)
-                mask_coords2 = np.argwhere(mask2 == 1)
-                mask_coords3 = np.argwhere(mask3 == 1)
-
-                # calculate dimensions of each mask
-                mask1_row_min = min(mask_coords1[:, 0])
-                mask1_row_max = max(mask_coords1[:, 0])
-                mask1_col_min = min(mask_coords1[:, 1])
-                mask1_col_max = max(mask_coords1[:, 1])
-
-                mask2_row_min = min(mask_coords2[:, 0])
-                mask2_row_max = max(mask_coords2[:, 0])
-                mask2_col_min = min(mask_coords2[:, 1])
-                mask2_col_max = max(mask_coords2[:, 1])
-
-                mask3_row_min = min(mask_coords3[:, 0])
-                mask3_row_max = max(mask_coords3[:, 0])
-                mask3_col_min = min(mask_coords3[:, 1])
-                mask3_col_max = max(mask_coords3[:, 1])
+                # dimensions of each mask
+                mask1_row_min, mask2_row_min, mask3_row_min = mask_row_min[frame_i:frame_i+3]
+                mask1_row_max, mask2_row_max, mask3_row_max = mask_row_max[frame_i:frame_i+3]
+                mask1_col_min, mask2_col_min, mask3_col_min = mask_col_min[frame_i:frame_i+3]
+                mask1_col_max, mask2_col_max, mask3_col_max = mask_col_max[frame_i:frame_i+3]
 
                 # calculate the union dimensions of the three masks (clip at 0 and frame_rows/cols)
                 mask_L_boundary = max(
@@ -377,21 +382,8 @@ if __name__ == '__main__':
                     frame_rows
                 )
 
-                # load corresponding segmentation files
-                segm_arr1 = np.load(
-                    f'{INPUT_SEGMENTATION_DIR}{seq_id}/{frames_basename[frame_i]}.npy')
-                segm_arr2 = np.load(
-                    f'{INPUT_SEGMENTATION_DIR}{seq_id}/{frames_basename[frame_i+1]}.npy')
-                segm_arr3 = np.load(
-                    f'{INPUT_SEGMENTATION_DIR}{seq_id}/{frames_basename[frame_i+2]}.npy')
-
-                # only retain the segmentation of the thigh (returns 0 or 255)
-                segm_mask1 = cv2.inRange(segm_arr1, tuple(LTHIGH_SEGMENT_COLOUR),
-                                         tuple(LTHIGH_SEGMENT_COLOUR))
-                segm_mask2 = cv2.inRange(segm_arr2, tuple(LTHIGH_SEGMENT_COLOUR),
-                                         tuple(LTHIGH_SEGMENT_COLOUR))
-                segm_mask3 = cv2.inRange(segm_arr3, tuple(LTHIGH_SEGMENT_COLOUR),
-                                         tuple(LTHIGH_SEGMENT_COLOUR))
+                # segmentation of the thigh (returns 0 or 255)
+                segm_mask1, segm_mask2, segm_mask3 = segm_mask[frame_i:frame_i+3]
 
                 # remove segmentation errors by filtering out what is out of the silhouette mask
                 mask_select = np.ones((mask_rows, mask_cols), bool)
@@ -405,10 +397,9 @@ if __name__ == '__main__':
                 #     cv2.cvtColor(segm_mask1, cv2.COLOR_GRAY2RGB), 0.6,
                 #     cv2.cvtColor(frame1, cv2.COLOR_RGB2BGR), 0.4, 0.0), 'mask_segm')
 
-            # otherwise, compute flows for entire images
             else:
 
-                # mask boundaries = frame boundaries
+                # if no no mask specified, use frame dimensions
                 mask_L_boundary = 0
                 mask_R_boundary = frame_cols
                 mask_T_boundary = 0
@@ -499,7 +490,7 @@ if __name__ == '__main__':
                         tangential[i, j, 1] = tangential_i - i
 
             # if segmentations are provided (look for first), analyse acceleration in thigh
-            if os.path.isfile(f'{INPUT_SEGMENTATION_DIR}{seq_id}/{frames[frame_i]}'):
+            if FLAG_SEGMENTATION:
                 rad_acc_avg_arr.append(np.mean(
                     np.sqrt(
                         radial[segm_mask2 == 255, 0]**2
@@ -544,33 +535,3 @@ if __name__ == '__main__':
         # save average radial acceleration in thigh
         np.save(f'{OUTPUT_DIR}{seq_id}_rad_thigh.npy',
                 np.array(rad_acc_avg_arr))
-
-        # plot average radial acceleration in thigh
-        sns.scatterplot(x=range(len(rad_acc_avg_arr)),
-                        y=rad_acc_avg_arr,
-                        label='subject ' + seq_id)
-
-    plt.title('Average Radial Acceleration in Thigh')
-    plt.xlabel('x')
-    plt.ylabel('avg radial acceleration (magnitude)')
-    plt.legend(loc='upper right')
-    plt.savefig(OUTPUT_DIR + 'plots/average_radial_acceleration_in_thigh')
-
-# %%
-rad_acc_avg_arr3 = np.load(
-    '/Users/BrentDeHauwere/Documents/Academic_Archive/MSc Artificial Intelligence/MSc Project/Implementation/msc-project/data/results/009a017s03L_rad_thigh.npy')
-rad_acc_avg_arr2 = np.load(
-    '/Users/BrentDeHauwere/Documents/Academic_Archive/MSc Artificial Intelligence/MSc Project/Implementation/msc-project/data/results/009a017s02L_rad_thigh.npy')
-
-sns.scatterplot(x=range(len(rad_acc_avg_arr3)),
-                y=rad_acc_avg_arr3,
-                label='subject ' + '009a017s03L')
-sns.scatterplot(x=range(len(rad_acc_avg_arr2)),
-                y=rad_acc_avg_arr2,
-                label='subject ' + '009a017s02L')
-
-plt.title('Average Radial Acceleration in Thigh')
-plt.xlabel('x')
-plt.ylabel('avg radial acceleration (magnitude)')
-plt.legend(loc='upper right')
-plt.savefig(OUTPUT_DIR + 'plots/average_radial_acceleration_in_thigh_')

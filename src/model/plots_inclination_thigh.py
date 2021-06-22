@@ -1,6 +1,5 @@
 # %%
 import math
-import cv2
 import os
 import glob
 import json
@@ -46,16 +45,17 @@ def calc_cos_thigh(seq_id, frame_id):
     return cos_theta
 
 
-# iterate over each sequence (represented by a directory)
 for seq_id in [x for x in os.listdir(INPUT_SEQUENCES_DIR) if os.path.isdir(INPUT_POSE_ESTIMATION_DIR + x)]:
 
-    # retrieve frame names and sort
+    # retrieve framenames and sort
     frames = [os.path.splitext(os.path.basename(x))[0] for x in glob.glob(
         f'{INPUT_SEQUENCES_DIR}{seq_id}/*.png')]
     frames.sort()
 
+    # retrieve keypoints and calculate cos(th) of thigh
     cos_thighs = [calc_cos_thigh(seq_id, f) for f in frames]
 
+    # plot cos(th) per frame
     sns.scatterplot(x=range(len(cos_thighs)),
                     y=cos_thighs,
                     label='subject ' + seq_id)
@@ -65,3 +65,5 @@ plt.xlabel('x')
 plt.ylabel('cos(θ)')
 plt.legend(loc='upper right')
 plt.savefig(OUTPUT_DIR + 'plots/inclination_of_left_thigh')
+plt.show()
+plt.clf()
