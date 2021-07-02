@@ -8,11 +8,13 @@ import os
 INPUT_RAW_SEQ_DIR = 'data/raw/sequences/'
 OUTPUT_PROCESSED_SEQ_DIR = 'data/processed/sequences/'
 
+VIDEO_FORMAT = 'dv'
+
 
 def raw_video_sequences_to_frames():
     # find all the videos that need to be turned into frames
     vid_names = [os.path.basename(path)
-                 for path in glob.glob(f'{INPUT_RAW_SEQ_DIR}/*.dv')]
+                 for path in glob.glob(f'{INPUT_RAW_SEQ_DIR}/*.{VIDEO_FORMAT}')]
     print(f'Found {len(vid_names)} files: {vid_names}')
 
     # often the sequence videos have leading and trailing frames
