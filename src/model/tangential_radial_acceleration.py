@@ -29,8 +29,7 @@ ACC_MAGNITUDE_THRESHOLD = 1
 SCALE_MAGNITUDE = 1
 
 LTHIGH_SEGMENT_COLOUR = [0, 255, 0]  # BGR
-POINT_LTHIGH = 12
-POINT_LKNEE = 13
+LLEG_SEGMENT_COLOUR = [127, 255, 127]  # BGR
 
 
 def circle_centre(x1, y1, x2, y2, x3, y3):
@@ -157,35 +156,6 @@ def calc_tan_rad(mask_rows, mask_cols, i, j, u1, v1, u2, v2):
         O_j = j
 
     return radial_i, radial_j, tangential_i, tangential_j, O_i, O_j
-
-
-def calc_cos_thigh(seq_id, frame_id):
-
-    with open(f'{INPUT_POSE_ESTIMATION_DIR}{seq_id}/{frame_id}_keypoints.json') as json_file:
-        data = json.load(json_file)
-
-    assert len(data['people']) == 1
-
-    x_lthigh = data['people'][0]['pose_keypoints_2d'][POINT_LTHIGH*3]
-    y_lthigh = data['people'][0]['pose_keypoints_2d'][POINT_LTHIGH*3 + 1]
-    c_lthigh = data['people'][0]['pose_keypoints_2d'][POINT_LTHIGH*3 + 2]
-    print(x_lthigh, y_lthigh, c_lthigh)
-
-    x_lknee = data['people'][0]['pose_keypoints_2d'][POINT_LKNEE*3]
-    y_lknee = data['people'][0]['pose_keypoints_2d'][POINT_LKNEE*3 + 1]
-    c_lknee = data['people'][0]['pose_keypoints_2d'][POINT_LKNEE*3 + 2]
-    print(x_lknee, y_lknee, c_lknee)
-
-    # angle in rad (- because x-axis is inverted)
-    m = - math.atan2(y_lthigh-y_lknee, x_lthigh-x_lknee)
-
-    # angle in degrees
-    theta = math.degrees(m)
-
-    # cosinus of angle (between thigh and x-axis)
-    cos_theta = math.cos(m)
-
-    return cos_theta
 
 
 def draw_arrows(img, flow, step=10):
@@ -340,11 +310,14 @@ if __name__ == '__main__':
                         for fbn in frames_basename]
 
             # only retain the segmentation of the thigh (returns 0 or 255)
-            segm_mask = [cv2.inRange(sa, tuple(LTHIGH_SEGMENT_COLOUR),
-                                     tuple(LTHIGH_SEGMENT_COLOUR)) for sa in segm_arr]
+            segm_mask_thigh = [cv2.inRange(sa, tuple(LTHIGH_SEGMENT_COLOUR),
+                                           tuple(LTHIGH_SEGMENT_COLOUR)) for sa in segm_arr]
+            segm_mask_leg = [cv2.inRange(sa, tuple(LLEG_SEGMENT_COLOUR),
+                                         tuple(LLEG_SEGMENT_COLOUR)) for sa in segm_arr]
 
-        # array to save average acceleration in thigh per frame
-        rad_acc_avg_arr = []
+        # array to save average acceleration in thigh and leg per frame
+        rad_thigh_arr = []
+        rad_leg_arr = []
 
         # iterative over all frames
         for frame_i in tqdm(range(len(frames_fname) - 2), desc=seq_id):
@@ -382,16 +355,17 @@ if __name__ == '__main__':
                     frame_rows
                 )
 
-                # segmentation of the thigh (returns 0 or 255)
-                segm_mask1, segm_mask2, segm_mask3 = segm_mask[frame_i:frame_i+3]
+                # segmentation of the body parts (returns 0 or 255)
+                segm_mask1_thigh, segm_mask2_thigh, segm_mask3_thigh = segm_mask_thigh[
+                    frame_i:frame_i+3]
+                segm_mask1_leg, segm_mask2_leg, segm_mask3_leg = segm_mask_leg[frame_i:frame_i+3]
 
                 # remove segmentation errors by filtering out what is out of the silhouette mask
                 mask_select = np.ones((mask_rows, mask_cols), bool)
                 mask_select[mask_T_boundary:mask_B_boundary,
                             mask_L_boundary: mask_R_boundary] = 0
-                segm_mask1[mask_select] = 0
-                segm_mask2[mask_select] = 0
-                segm_mask3[mask_select] = 0
+                segm_mask2_thigh[mask_select] = 0
+                segm_mask2_leg[mask_select] = 0
 
                 # _show_image(cv2.addWeighted(
                 #     cv2.cvtColor(segm_mask1, cv2.COLOR_GRAY2RGB), 0.6,
@@ -489,49 +463,58 @@ if __name__ == '__main__':
                         tangential[i, j, 0] = tangential_j - j
                         tangential[i, j, 1] = tangential_i - i
 
-            # if segmentations are provided (look for first), analyse acceleration in thigh
+            # if segmentations are provided (look for first), analyse acceleration in body parts
             if FLAG_SEGMENTATION:
-                rad_acc_avg_arr.append(np.mean(
+                rad_thigh_arr.append(np.mean(
                     np.sqrt(
-                        radial[segm_mask2 == 255, 0]**2
-                        + radial[segm_mask2 == 255, 1]**2
+                        radial[segm_mask2_thigh == 255, 0]**2
+                        + radial[segm_mask2_thigh == 255, 1]**2
                     )
                 ))
 
-            # draw plots (and scale magnitude to make arrows more visible)
-            vel_viz_hsv = draw_hsv(frame2, flow=np.stack(
-                [u2, v2], axis=-1)*SCALE_MAGNITUDE)
-            acc_viz_hsv = draw_hsv(frame2, flow=np.stack(
-                [acc_u, acc_v], axis=-1)*SCALE_MAGNITUDE)
-            rad_viz_hsv = draw_hsv(frame2, flow=radial*SCALE_MAGNITUDE)
-            tan_viz_hsv = draw_hsv(frame2, flow=tangential*SCALE_MAGNITUDE)
+                rad_leg_arr.append(np.mean(
+                    np.sqrt(
+                        radial[segm_mask2_leg == 255, 0]**2
+                        + radial[segm_mask2_leg == 255, 1]**2
+                    )
+                ))
 
-            vel_viz = draw_arrows(frame2, flow=np.stack(
-                [u2, v2], axis=-1)*SCALE_MAGNITUDE)
-            acc_viz = draw_arrows(
-                frame2, flow=np.stack([acc_u, acc_v], axis=-1)*SCALE_MAGNITUDE)
-            rad_viz = draw_arrows(frame2, flow=radial*SCALE_MAGNITUDE)
-            tan_viz = draw_arrows(frame2, flow=tangential*SCALE_MAGNITUDE)
+            # # draw plots (and scale magnitude to make arrows more visible)
+            # vel_viz_hsv = draw_hsv(frame2, flow=np.stack(
+            #     [u2, v2], axis=-1)*SCALE_MAGNITUDE)
+            # acc_viz_hsv = draw_hsv(frame2, flow=np.stack(
+            #     [acc_u, acc_v], axis=-1)*SCALE_MAGNITUDE)
+            # rad_viz_hsv = draw_hsv(frame2, flow=radial*SCALE_MAGNITUDE)
+            # tan_viz_hsv = draw_hsv(frame2, flow=tangential*SCALE_MAGNITUDE)
 
-            # save plots
-            cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/velocity_hsv/{frame_i+1:06d}.png', vel_viz_hsv)
-            cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/acceleration_hsv/{frame_i+1:06d}.png', acc_viz_hsv)
-            cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/radial_hsv/{frame_i+1:06d}.png', rad_viz_hsv)
-            cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/tangential_hsv/{frame_i+1:06d}.png', tan_viz_hsv)
+            # vel_viz = draw_arrows(frame2, flow=np.stack(
+            #     [u2, v2], axis=-1)*SCALE_MAGNITUDE)
+            # acc_viz = draw_arrows(
+            #     frame2, flow=np.stack([acc_u, acc_v], axis=-1)*SCALE_MAGNITUDE)
+            # rad_viz = draw_arrows(frame2, flow=radial*SCALE_MAGNITUDE)
+            # tan_viz = draw_arrows(frame2, flow=tangential*SCALE_MAGNITUDE)
 
-            cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/velocity/{frame_i+1:06d}.png', vel_viz)
-            cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/acceleration/{frame_i+1:06d}.png', acc_viz)
-            cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/radial/{frame_i+1:06d}.png', rad_viz)
-            cv2.imwrite(
-                f'{OUTPUT_DIR}{seq_id}/tangential/{frame_i+1:06d}.png', tan_viz)
+            # # save plots
+            # cv2.imwrite(
+            #     f'{OUTPUT_DIR}{seq_id}/velocity_hsv/{frame_i+1:06d}.png', vel_viz_hsv)
+            # cv2.imwrite(
+            #     f'{OUTPUT_DIR}{seq_id}/acceleration_hsv/{frame_i+1:06d}.png', acc_viz_hsv)
+            # cv2.imwrite(
+            #     f'{OUTPUT_DIR}{seq_id}/radial_hsv/{frame_i+1:06d}.png', rad_viz_hsv)
+            # cv2.imwrite(
+            #     f'{OUTPUT_DIR}{seq_id}/tangential_hsv/{frame_i+1:06d}.png', tan_viz_hsv)
 
-        # save average radial acceleration in thigh
+            # cv2.imwrite(
+            #     f'{OUTPUT_DIR}{seq_id}/velocity/{frame_i+1:06d}.png', vel_viz)
+            # cv2.imwrite(
+            #     f'{OUTPUT_DIR}{seq_id}/acceleration/{frame_i+1:06d}.png', acc_viz)
+            # cv2.imwrite(
+            #     f'{OUTPUT_DIR}{seq_id}/radial/{frame_i+1:06d}.png', rad_viz)
+            # cv2.imwrite(
+            #     f'{OUTPUT_DIR}{seq_id}/tangential/{frame_i+1:06d}.png', tan_viz)
+
+        # save average radial acceleration in body parts
         np.save(f'{OUTPUT_DIR}{seq_id}_rad_thigh.npy',
-                np.array(rad_acc_avg_arr))
+                np.array(rad_thigh_arr))
+        np.save(f'{OUTPUT_DIR}{seq_id}_rad_leg.npy',
+                np.array(rad_leg_arr))
