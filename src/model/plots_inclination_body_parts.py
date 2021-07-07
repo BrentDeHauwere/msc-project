@@ -6,6 +6,7 @@ import json
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter1d
 
 INPUT_SEQUENCES_DIR = 'data/processed/sequences/'
 INPUT_POSE_ESTIMATION_DIR = 'data/processed/pose_estimation/'
@@ -15,6 +16,8 @@ N_POINTS = 25
 POINT_LTHIGH = 12
 POINT_LKNEE = 13
 POINT_LANKLE = 14
+POINT_NECK = 1
+POINT_MIDHIP = 8
 
 
 def calc_cos_body_part(seq_id, frame_id, keypoint1, keypoint2):
@@ -54,7 +57,8 @@ def calc_cos_body_part(seq_id, frame_id, keypoint1, keypoint2):
 
 # generate plot for each body part
 for bp_name, p1, p2 in [['left thigh', POINT_LTHIGH, POINT_LKNEE],
-                        ['left leg', POINT_LKNEE, POINT_LANKLE]]:
+                        ['left leg', POINT_LKNEE, POINT_LANKLE],
+                        ['torso', POINT_NECK, POINT_MIDHIP]]:
 
     # retrieve all the gait sequence ids
     for seq_id in [x for x in os.listdir(INPUT_SEQUENCES_DIR) if os.path.isdir(INPUT_POSE_ESTIMATION_DIR + x)]:
@@ -66,6 +70,7 @@ for bp_name, p1, p2 in [['left thigh', POINT_LTHIGH, POINT_LKNEE],
 
         # retrieve keypoints and calculate cos(th) of thigh
         cos = [calc_cos_body_part(seq_id, f, p1, p2) for f in frames]
+        # cos = gaussian_filter1d(cos, sigma=1, truncate=1)
 
         # plot cos(th) per frame
         sns.scatterplot(x=range(len(cos)),

@@ -30,6 +30,7 @@ SCALE_MAGNITUDE = 1
 
 LTHIGH_SEGMENT_COLOUR = [0, 255, 0]  # BGR
 LLEG_SEGMENT_COLOUR = [127, 255, 127]  # BGR
+TORSO_SEGMENT_COLOUR = [0, 0, 255]  # BGR
 
 
 def circle_centre(x1, y1, x2, y2, x3, y3):
@@ -314,10 +315,13 @@ if __name__ == '__main__':
                                            tuple(LTHIGH_SEGMENT_COLOUR)) for sa in segm_arr]
             segm_mask_leg = [cv2.inRange(sa, tuple(LLEG_SEGMENT_COLOUR),
                                          tuple(LLEG_SEGMENT_COLOUR)) for sa in segm_arr]
+            segm_mask_torso = [cv2.inRange(sa, tuple(TORSO_SEGMENT_COLOUR),
+                                           tuple(TORSO_SEGMENT_COLOUR)) for sa in segm_arr]
 
         # array to save average acceleration in thigh and leg per frame
         rad_thigh_arr = []
         rad_leg_arr = []
+        rad_torso_arr = []
 
         # iterative over all frames
         for frame_i in tqdm(range(len(frames_fname) - 2), desc=seq_id):
@@ -359,6 +363,8 @@ if __name__ == '__main__':
                 segm_mask1_thigh, segm_mask2_thigh, segm_mask3_thigh = segm_mask_thigh[
                     frame_i:frame_i+3]
                 segm_mask1_leg, segm_mask2_leg, segm_mask3_leg = segm_mask_leg[frame_i:frame_i+3]
+                segm_mask1_torso, segm_mask2_torso, segm_mask3_torso = segm_mask_torso[
+                    frame_i:frame_i+3]
 
                 # remove segmentation errors by filtering out what is out of the silhouette mask
                 mask_select = np.ones((mask_rows, mask_cols), bool)
@@ -366,6 +372,7 @@ if __name__ == '__main__':
                             mask_L_boundary: mask_R_boundary] = 0
                 segm_mask2_thigh[mask_select] = 0
                 segm_mask2_leg[mask_select] = 0
+                segm_mask2_torso[mask_select] = 0
 
                 # _show_image(cv2.addWeighted(
                 #     cv2.cvtColor(segm_mask1, cv2.COLOR_GRAY2RGB), 0.6,
@@ -479,6 +486,13 @@ if __name__ == '__main__':
                     )
                 ))
 
+                rad_torso_arr.append(np.mean(
+                    np.sqrt(
+                        radial[segm_mask2_torso == 255, 0]**2
+                        + radial[segm_mask2_torso == 255, 1]**2
+                    )
+                ))
+
             # # draw plots (and scale magnitude to make arrows more visible)
             # vel_viz_hsv = draw_hsv(frame2, flow=np.stack(
             #     [u2, v2], axis=-1)*SCALE_MAGNITUDE)
@@ -518,3 +532,5 @@ if __name__ == '__main__':
                 np.array(rad_thigh_arr))
         np.save(f'{OUTPUT_DIR}{seq_id}_rad_leg.npy',
                 np.array(rad_leg_arr))
+        np.save(f'{OUTPUT_DIR}{seq_id}_rad_torso.npy',
+                np.array(rad_torso_arr))
