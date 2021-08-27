@@ -10,7 +10,7 @@ from scipy.ndimage import gaussian_filter1d
 
 INPUT_SEQUENCES_DIR = 'data/processed/sequences/'
 INPUT_POSE_ESTIMATION_DIR = 'data/processed/pose_estimation/'
-OUTPUT_DIR = 'data/results/'
+OUTPUT_DIR = 'data/plots/'
 
 N_POINTS = 25
 POINT_LTHIGH = 12
@@ -52,7 +52,18 @@ def calc_cos_body_part(seq_id, frame_id, keypoint1, keypoint2):
     # cosinus of angle (between thigh and x-axis)
     cos_theta = math.cos(m)
 
-    return cos_theta
+    return theta
+
+
+def manual_slicing(frames):
+    if seq_id == '009a017s04L':
+        frames = frames[16:]
+    elif seq_id == 'fyc-00_3':
+        frames = frames[6:]
+    elif seq_id == 'syj-00_3':
+        frames = frames[2:]
+
+    return frames
 
 
 # generate plot for each body part
@@ -68,20 +79,23 @@ for bp_name, p1, p2 in [['left thigh', POINT_LTHIGH, POINT_LKNEE],
             f'{INPUT_SEQUENCES_DIR}{seq_id}/*.png')]
         frames.sort()
 
-        # retrieve keypoints and calculate cos(th) of thigh
-        cos = [calc_cos_body_part(seq_id, f, p1, p2) for f in frames]
-        # cos = gaussian_filter1d(cos, sigma=1, truncate=1)
+        # MANUAL SLICING OF SEQUENCE TO SYNCHRONISE GAIT CYCLE
+        frames = manual_slicing(frames)
+
+        # retrieve keypoints and calculate theta of thigh
+        th = [calc_cos_body_part(seq_id, f, p1, p2) for f in frames]
+        th = gaussian_filter1d(th, sigma=1.6, truncate=2)
 
         # plot cos(th) per frame
-        sns.scatterplot(x=range(len(cos)),
-                        y=cos,
+        sns.scatterplot(x=range(len(th)),
+                        y=th,
                         label='subject ' + seq_id)
 
-    plt.title(f'Inclination of {bp_name.title()}')
+    # plt.title(f'Inclination of {bp_name.title()}')
     plt.xlabel('x')
-    plt.ylabel('cos(θ)')
+    plt.ylabel('θ')
     plt.legend(loc='upper right')
     plt.savefig(
-        OUTPUT_DIR + f'plots/inclination_of_{bp_name.replace(" ", "_")}')
+        OUTPUT_DIR + f'inclination_of_{bp_name.replace(" ", "_")}')
     plt.show()
     plt.clf()

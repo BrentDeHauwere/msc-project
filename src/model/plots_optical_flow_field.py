@@ -17,7 +17,7 @@ plt.imshow(np.sqrt(u**2 + v**2), cmap='gray',
            aspect='equal', extent=[0, 768, 0, 576])
 plt.axis('off')
 plt.margins(x=0)
-plt.savefig('data/results/plots/optflow_opencv_field.png', bbox_inches='tight')
+plt.savefig('data/optflow_opencv_field.png', bbox_inches='tight')
 plt.show()
 plt.clf()
 
@@ -28,7 +28,7 @@ img2 = Image.open('data/processed/_sequences/vtest/000008.png').convert('L')
 plt.imshow(ImageChops.subtract(img2, img1), cmap='gray')
 plt.axis('off')
 plt.margins(x=0)
-plt.savefig('data/results/plots/optflow_opencv_field_deduct.png',
+plt.savefig('data/optflow_opencv_field_deduct.png',
             bbox_inches='tight')
 plt.show()
 plt.clf()

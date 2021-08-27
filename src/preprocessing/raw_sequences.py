@@ -3,9 +3,11 @@ import pandas as pd
 import cv2
 import glob
 import os
+from tqdm import tqdm
 
 
 INPUT_RAW_SEQ_DIR = 'data/raw/sequences/'
+INPUT_SILHOUETTES_DIR = 'data/raw/silhouettes/'
 OUTPUT_PROCESSED_SEQ_DIR = 'data/processed/sequences/'
 
 VIDEO_FORMAT = 'dv'
@@ -24,7 +26,7 @@ def raw_video_sequences_to_frames():
                         delimiter=';', index_col=0)
 
     # for each video, extract frames
-    for vid_name in vid_names:
+    for vid_name in tqdm(vid_names):
         # output directory per video
         vid_id = os.path.splitext(vid_name)[0]
         vid_path = OUTPUT_PROCESSED_SEQ_DIR + vid_id
@@ -50,9 +52,20 @@ def raw_video_sequences_to_frames():
         # starting frame index, 0 if not specified
         start_i = seq_i.loc[vid_id, 'start_i'] if vid_id in seq_i.index else 0
 
-        # last frame index, all if not specified
-        end_i = seq_i.loc[vid_id, 'end_i'] if vid_id in seq_i.index else cap.get(
-            cv2.CAP_PROP_FRAME_COUNT)
+        # last frame index:
+        # if -1 specified, deduct from number of silhouettes
+        if vid_id in seq_i.index and (seq_i.loc[vid_id, 'end_i'] == -1):
+            n_silhouettes = len(
+                glob.glob(f'{INPUT_SILHOUETTES_DIR}/{vid_id}/*.png'))
+            end_i = start_i + n_silhouettes
+
+        # if other value specified, use it
+        elif vid_id in seq_i.index:
+            end_i = seq_i.loc[vid_id, 'end_i']
+
+        # if no value specified, retrieve all frames
+        else:
+            end_i = cap.get(cv2.CAP_PROP_FRAME_COUNT)
 
         # current sequence frame index
         i = 0

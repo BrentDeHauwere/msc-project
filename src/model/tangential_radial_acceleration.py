@@ -19,11 +19,14 @@ INPUT_SILHOUETTES_DIR = 'data/raw/silhouettes/'
 INPUT_SEGMENTATION_DIR = 'data/processed/segmentation/'
 INPUT_POSE_ESTIMATION_DIR = 'data/processed/pose_estimation/'
 INPUT_FLOW_DIR = 'data/processed/flow/'
+INPUT_RAD_DIR = 'data/processed/rad_body-part/'
 OUTPUT_DIR = 'data/results/'
 FLAG_DEEPFLOW2 = True
 
 FLAG_SILHOUETTES = None
 FLAG_SEGMENTATION = None
+
+DATABASE = 'SOTON'  # {SOTON, CASIA}
 
 ACC_MAGNITUDE_THRESHOLD = 1
 SCALE_MAGNITUDE = 1
@@ -256,7 +259,7 @@ def _show_image(img, title):
 
 if __name__ == '__main__':
     # iterate over each sequence (represented by a directory)
-    for seq_id in [x for x in os.listdir(INPUT_SEQUENCES_DIR) if os.path.isdir(INPUT_SEQUENCES_DIR + x)]:
+    for seq_id in [x for x in sorted(os.listdir(INPUT_SEQUENCES_DIR)) if os.path.isdir(INPUT_SEQUENCES_DIR + x)]:
 
         # create output directories if don't exist
         dirs = ['',
@@ -287,18 +290,19 @@ if __name__ == '__main__':
         frame_rows, frame_cols, frame_dims = frames[0].shape
 
         # if provided (look for first), load masks (silhouettes)
-        if (FLAG_SILHOUETTES := os.path.isfile(f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{frames_fname[0]}')) \
+        if (FLAG_SILHOUETTES := os.path.isfile(f'{INPUT_SILHOUETTES_DIR}{seq_id}/{"A" if DATABASE == "SOTON" else ""}{frames_fname[0]}')) \
                 and (FLAG_SEGMENTATION := os.path.isfile(f'{INPUT_SEGMENTATION_DIR}{seq_id}/{frames_basename[0]}.npy')):
 
             # load corresponding silhouettes (note: 0-1 scale // opencv does not support float64, default numpy)
-            masks = [np.array(Image.open(f'{INPUT_SILHOUETTES_DIR}{seq_id}/A{fn}'), dtype=np.float32)
+            masks = [np.array(Image.open(f'{INPUT_SILHOUETTES_DIR}{seq_id}/{"A" if DATABASE == "SOTON" else ""}{fn}'), dtype=np.float32)
                      for fn in frames_fname]
 
             # obtain mask dimensions
             mask_rows, mask_cols = masks[0].shape
 
             # obtain coordinates of mask (where intensity is 1 / white)
-            mask_coords = [np.argwhere(m == 1) for m in masks]
+            mask_coords = [np.argwhere(
+                m == (255 if DATABASE == 'CASIA' else 1)) for m in masks]
 
             # calculate dimensions of each mask
             mask_row_min = [min(mc[:, 0]) for mc in mask_coords]
@@ -318,10 +322,17 @@ if __name__ == '__main__':
             segm_mask_torso = [cv2.inRange(sa, tuple(TORSO_SEGMENT_COLOUR),
                                            tuple(TORSO_SEGMENT_COLOUR)) for sa in segm_arr]
 
+        print('FLAG_SILHOUETTES', FLAG_SILHOUETTES)
+        print('FLAG_SEGMENTATION', FLAG_SEGMENTATION)
+
         # array to save average acceleration in thigh and leg per frame
         rad_thigh_arr = []
         rad_leg_arr = []
         rad_torso_arr = []
+        rad_torso_15_arr = []
+        # rad_torso_half_arr = []
+        # rad_torso_erosion_arr = []
+        # rad_torso_dilation_arr = []
 
         # iterative over all frames
         for frame_i in tqdm(range(len(frames_fname) - 2), desc=seq_id):
@@ -373,6 +384,46 @@ if __name__ == '__main__':
                 segm_mask2_thigh[mask_select] = 0
                 segm_mask2_leg[mask_select] = 0
                 segm_mask2_torso[mask_select] = 0
+
+                # obtain the top 15% of the torso mask
+                torso_coord = np.argwhere(segm_mask2_torso == 255)
+                torso_row_min = min(torso_coord[:, 0])
+                torso_row_max = max(torso_coord[:, 0])
+                torso_select_15 = np.ones((mask_rows, mask_cols), bool)
+                torso_select_15[torso_row_min:(torso_row_min + round((torso_row_max-torso_row_min)*0.15)),
+                                0:frame_cols] = 0
+                segm_torso_15 = segm_mask2_torso.copy()
+                segm_torso_15[torso_select_15] = 0
+
+                # # obtain the top 50% of the torso mask
+                # torso_coord = np.argwhere(segm_mask2_torso == 255)
+                # torso_row_min = min(torso_coord[:, 0])
+                # torso_row_max = max(torso_coord[:, 0])
+                # torso_select = np.ones((mask_rows, mask_cols), bool)
+                # torso_select[torso_row_min:(torso_row_min + round((torso_row_max-torso_row_min)/2)),
+                #              0:frame_cols] = 0
+                # segm_torso_half = segm_mask2_torso.copy()
+                # segm_torso_half[torso_select] = 0
+
+                # # kernel is the matrix with which image is convolved
+                # # iterations determines how much you want to erode/dilate a given image
+                # kernel_size = 9
+                # kernel = np.ones((kernel_size, kernel_size), np.uint8)
+                # segm_torso_erosion = cv2.erode(
+                #     segm_mask2_torso, kernel, iterations=1)
+                # segm_torso_dilation = cv2.dilate(
+                #     segm_mask2_torso, kernel, iterations=1)
+
+                # _show_image(segm_mask2_torso, 'segm_mask2_torso')
+                # _show_image(segm_torso_half, 'segm_torso_half')
+                # _show_image(segm_torso_erosion, 'img_erosion')
+                # _show_image(segm_torso_dilation, 'img_dilation')
+
+                # x = segm_arr[12]
+                # x[mask_select] = 0
+                # cv2.imwrite(OUTPUT_DIR + 'segm_output_processed.png',
+                #             cv2.addWeighted(x, 0.6,
+                #                             cv2.cvtColor(frames[12], cv2.COLOR_RGB2BGR), 0.4, 0.0))
 
                 # _show_image(cv2.addWeighted(
                 #     cv2.cvtColor(segm_mask1, cv2.COLOR_GRAY2RGB), 0.6,
@@ -470,7 +521,7 @@ if __name__ == '__main__':
                         tangential[i, j, 0] = tangential_j - j
                         tangential[i, j, 1] = tangential_i - i
 
-            # if segmentations are provided (look for first), analyse acceleration in body parts
+            # if segmentations are provided, analyse radial magnitude in body parts
             if FLAG_SEGMENTATION:
                 rad_thigh_arr.append(np.mean(
                     np.sqrt(
@@ -492,6 +543,34 @@ if __name__ == '__main__':
                         + radial[segm_mask2_torso == 255, 1]**2
                     )
                 ))
+
+                rad_torso_15_arr.append(np.mean(
+                    np.sqrt(
+                        radial[segm_torso_15 == 255, 0]**2
+                        + radial[segm_torso_15 == 255, 1]**2
+                    )
+                ))
+
+                # rad_torso_half_arr.append(np.mean(
+                #     np.sqrt(
+                #         radial[segm_torso_half == 255, 0]**2
+                #         + radial[segm_torso_half == 255, 1]**2
+                #     )
+                # ))
+
+                # rad_torso_erosion_arr.append(np.mean(
+                #     np.sqrt(
+                #         radial[segm_torso_erosion == 255, 0]**2
+                #         + radial[segm_torso_erosion == 255, 1]**2
+                #     )
+                # ))
+
+                # rad_torso_dilation_arr.append(np.mean(
+                #     np.sqrt(
+                #         radial[segm_torso_dilation == 255, 0]**2
+                #         + radial[segm_torso_dilation == 255, 1]**2
+                #     )
+                # ))
 
             # # draw plots (and scale magnitude to make arrows more visible)
             # vel_viz_hsv = draw_hsv(frame2, flow=np.stack(
@@ -528,9 +607,17 @@ if __name__ == '__main__':
             #     f'{OUTPUT_DIR}{seq_id}/tangential/{frame_i+1:06d}.png', tan_viz)
 
         # save average radial acceleration in body parts
-        np.save(f'{OUTPUT_DIR}{seq_id}_rad_thigh.npy',
+        np.save(f'{INPUT_RAD_DIR}{seq_id}_rad_thigh.npy',
                 np.array(rad_thigh_arr))
-        np.save(f'{OUTPUT_DIR}{seq_id}_rad_leg.npy',
+        np.save(f'{INPUT_RAD_DIR}{seq_id}_rad_leg.npy',
                 np.array(rad_leg_arr))
-        np.save(f'{OUTPUT_DIR}{seq_id}_rad_torso.npy',
+        np.save(f'{INPUT_RAD_DIR}{seq_id}_rad_torso.npy',
                 np.array(rad_torso_arr))
+        np.save(f'{INPUT_RAD_DIR}{seq_id}_rad_torso_15.npy',
+                np.array(rad_torso_15_arr))
+        # np.save(f'{INPUT_RAD_DIR}{seq_id}_rad_torso_half.npy',
+        #         np.array(rad_torso_half_arr))
+        # np.save(f'{INPUT_RAD_DIR}{seq_id}_rad_torso_erosion.npy',
+        #         np.array(rad_torso_erosion_arr))
+        # np.save(f'{INPUT_RAD_DIR}{seq_id}_rad_torso_dilation.npy',
+        #         np.array(rad_torso_dilation_arr))

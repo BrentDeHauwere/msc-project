@@ -3,7 +3,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.ndimage import gaussian_filter1d
-from sklearn.preprocessing import StandardScaler
 
 # %% SOTON
 INPUT_RAD_DIR = 'data/processed/rad_body-part/'
@@ -51,26 +50,34 @@ rad_torso_arr3_gaus = gaussian_filter1d(
 rad_torso_arr4_gaus = gaussian_filter1d(
     rad_torso_arr4, sigma=SIGMA, truncate=TRUNCATE)
 
-for bpname, type, rad2, rad3, rad4 in [['thigh', 'raw', rad_thigh_arr2, rad_thigh_arr3, rad_thigh_arr4],
-                                       ['thigh', 'gaus', rad_thigh_arr2_gaus,
-                                        rad_thigh_arr3_gaus, rad_thigh_arr4_gaus],
-                                       ['leg', 'raw', rad_leg_arr2,
-                                           rad_leg_arr3, rad_leg_arr4],
-                                       ['leg', 'gaus', rad_leg_arr2_gaus,
-                                        rad_leg_arr3_gaus, rad_leg_arr4_gaus],
-                                       ['torso', 'raw', rad_torso_arr2,
-                                           rad_torso_arr3, rad_torso_arr4],
-                                       ['torso', 'gaus', rad_torso_arr2_gaus, rad_torso_arr3_gaus, rad_torso_arr4_gaus]]:
+for bpname, type, rad2, rad3, rad4 in [
+    ['thigh', 'gaus', rad_thigh_arr2_gaus,
+     rad_thigh_arr3_gaus, rad_thigh_arr4_gaus],
 
+    ['leg', 'gaus', rad_leg_arr2_gaus,
+     rad_leg_arr3_gaus, rad_leg_arr4_gaus],
+
+        ['torso', 'gaus', rad_torso_arr2_gaus, rad_torso_arr3_gaus, rad_torso_arr4_gaus]]:
+
+    avg_incl = np.load(
+        f'/Users/BrentDeHauwere/Documents/Academic_Archive/MSc Artificial Intelligence/MSc Project/Implementation/msc-project/009a017s02L_left {bpname}_incl.npy')
+    avg_incl = (avg_incl - avg_incl.min()) / \
+        (avg_incl.max() - avg_incl.min()) + 0.3
+
+    # xi−min(x)max(x)−min(x)
     sns.scatterplot(x=range(len(rad2)),
-                    y=rad2,
+                    y=(rad2 - rad2.min())/(rad2.max() - rad2.min())*2-1,
                     label='subject ' + SUBJECTS[0])
     sns.scatterplot(x=range(len(rad3)),
-                    y=rad3,
+                    y=(rad3 - rad3.min())/(rad3.max() - rad3.min())*2-1,
                     label='subject ' + SUBJECTS[1])
     sns.scatterplot(x=range(len(rad4)),
-                    y=rad4,
+                    y=(rad4 - rad4.min())/(rad4.max() - rad4.min())*2-1,
                     label='subject ' + SUBJECTS[2])
+    sns.scatterplot(x=range(len(avg_incl)),
+                    y=(avg_incl - avg_incl.min()) /
+                    (avg_incl.max() - avg_incl.min())*2-1,
+                    label='average inclination')
 
     # plt.title(
     #     f'Average Radial Acceleration in {bpname.capitalize()} ({type.capitalize()})')
