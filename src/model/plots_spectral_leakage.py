@@ -124,21 +124,6 @@ for window_type in ['hann',
               title=f'Frequency Response of the {window_type.title()} Window', plot_type='plot')
     # plt.axis('tight')
 
-    # plt.figure()
-    # A = fft(window, 2048) / 25.5
-    # mag = np.abs(fftshift(A))
-    # freq = np.linspace(-0.5, 0.5, len(A))
-    # with np.errstate(divide='ignore', invalid='ignore'):
-    #     response = 20 * np.log10(mag)
-    # response = np.clip(response, -100, 100)
-
-    # plt.plot(freq, response)
-    # plt.title("Frequency response of the Hann window")
-    # plt.ylabel("Magnitude [dB]")
-    # plt.xlabel("Normalized frequency [cycles per sample]")
-    # plt.axis('tight')
-    # plt.show()
-
     amplitude_multiplied_window = amplitude * window_func
     plot_data(time, amplitude_multiplied_window, 'time (s)', 'amplitude', f'{OUTPUT_DIR}{window_type}_multiplied.png',
               title=f'{window_type.title()} Window', plot_type='stem')

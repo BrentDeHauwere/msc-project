@@ -329,7 +329,7 @@ if __name__ == '__main__':
         rad_thigh_arr = []
         rad_leg_arr = []
         rad_torso_arr = []
-        rad_torso_15_arr = []
+        # rad_torso_15_arr = []
         # rad_torso_half_arr = []
         # rad_torso_erosion_arr = []
         # rad_torso_dilation_arr = []
@@ -385,15 +385,15 @@ if __name__ == '__main__':
                 segm_mask2_leg[mask_select] = 0
                 segm_mask2_torso[mask_select] = 0
 
-                # obtain the top 15% of the torso mask
-                torso_coord = np.argwhere(segm_mask2_torso == 255)
-                torso_row_min = min(torso_coord[:, 0])
-                torso_row_max = max(torso_coord[:, 0])
-                torso_select_15 = np.ones((mask_rows, mask_cols), bool)
-                torso_select_15[torso_row_min:(torso_row_min + round((torso_row_max-torso_row_min)*0.15)),
-                                0:frame_cols] = 0
-                segm_torso_15 = segm_mask2_torso.copy()
-                segm_torso_15[torso_select_15] = 0
+                # # obtain the top 15% of the torso mask
+                # torso_coord = np.argwhere(segm_mask2_torso == 255)
+                # torso_row_min = min(torso_coord[:, 0])
+                # torso_row_max = max(torso_coord[:, 0])
+                # torso_select_15 = np.ones((mask_rows, mask_cols), bool)
+                # torso_select_15[torso_row_min:(torso_row_min + round((torso_row_max-torso_row_min)*0.15)),
+                #                 0:frame_cols] = 0
+                # segm_torso_15 = segm_mask2_torso.copy()
+                # segm_torso_15[torso_select_15] = 0
 
                 # # obtain the top 50% of the torso mask
                 # torso_coord = np.argwhere(segm_mask2_torso == 255)
@@ -544,12 +544,12 @@ if __name__ == '__main__':
                     )
                 ))
 
-                rad_torso_15_arr.append(np.mean(
-                    np.sqrt(
-                        radial[segm_torso_15 == 255, 0]**2
-                        + radial[segm_torso_15 == 255, 1]**2
-                    )
-                ))
+                # rad_torso_15_arr.append(np.mean(
+                #     np.sqrt(
+                #         radial[segm_torso_15 == 255, 0]**2
+                #         + radial[segm_torso_15 == 255, 1]**2
+                #     )
+                # ))
 
                 # rad_torso_half_arr.append(np.mean(
                 #     np.sqrt(
@@ -572,39 +572,39 @@ if __name__ == '__main__':
                 #     )
                 # ))
 
-            # # draw plots (and scale magnitude to make arrows more visible)
-            # vel_viz_hsv = draw_hsv(frame2, flow=np.stack(
-            #     [u2, v2], axis=-1)*SCALE_MAGNITUDE)
-            # acc_viz_hsv = draw_hsv(frame2, flow=np.stack(
-            #     [acc_u, acc_v], axis=-1)*SCALE_MAGNITUDE)
-            # rad_viz_hsv = draw_hsv(frame2, flow=radial*SCALE_MAGNITUDE)
-            # tan_viz_hsv = draw_hsv(frame2, flow=tangential*SCALE_MAGNITUDE)
+            # draw plots (and scale magnitude to make arrows more visible)
+            vel_viz_hsv = draw_hsv(frame2, flow=np.stack(
+                [u2, v2], axis=-1)*SCALE_MAGNITUDE)
+            acc_viz_hsv = draw_hsv(frame2, flow=np.stack(
+                [acc_u, acc_v], axis=-1)*SCALE_MAGNITUDE)
+            rad_viz_hsv = draw_hsv(frame2, flow=radial*SCALE_MAGNITUDE)
+            tan_viz_hsv = draw_hsv(frame2, flow=tangential*SCALE_MAGNITUDE)
 
-            # vel_viz = draw_arrows(frame2, flow=np.stack(
-            #     [u2, v2], axis=-1)*SCALE_MAGNITUDE)
-            # acc_viz = draw_arrows(
-            #     frame2, flow=np.stack([acc_u, acc_v], axis=-1)*SCALE_MAGNITUDE)
-            # rad_viz = draw_arrows(frame2, flow=radial*SCALE_MAGNITUDE)
-            # tan_viz = draw_arrows(frame2, flow=tangential*SCALE_MAGNITUDE)
+            vel_viz = draw_arrows(frame2, flow=np.stack(
+                [u2, v2], axis=-1)*SCALE_MAGNITUDE)
+            acc_viz = draw_arrows(
+                frame2, flow=np.stack([acc_u, acc_v], axis=-1)*SCALE_MAGNITUDE)
+            rad_viz = draw_arrows(frame2, flow=radial*SCALE_MAGNITUDE)
+            tan_viz = draw_arrows(frame2, flow=tangential*SCALE_MAGNITUDE)
 
-            # # save plots
-            # cv2.imwrite(
-            #     f'{OUTPUT_DIR}{seq_id}/velocity_hsv/{frame_i+1:06d}.png', vel_viz_hsv)
-            # cv2.imwrite(
-            #     f'{OUTPUT_DIR}{seq_id}/acceleration_hsv/{frame_i+1:06d}.png', acc_viz_hsv)
-            # cv2.imwrite(
-            #     f'{OUTPUT_DIR}{seq_id}/radial_hsv/{frame_i+1:06d}.png', rad_viz_hsv)
-            # cv2.imwrite(
-            #     f'{OUTPUT_DIR}{seq_id}/tangential_hsv/{frame_i+1:06d}.png', tan_viz_hsv)
+            # save plots
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/velocity_hsv/{frame_i+1:06d}.png', vel_viz_hsv)
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/acceleration_hsv/{frame_i+1:06d}.png', acc_viz_hsv)
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/radial_hsv/{frame_i+1:06d}.png', rad_viz_hsv)
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/tangential_hsv/{frame_i+1:06d}.png', tan_viz_hsv)
 
-            # cv2.imwrite(
-            #     f'{OUTPUT_DIR}{seq_id}/velocity/{frame_i+1:06d}.png', vel_viz)
-            # cv2.imwrite(
-            #     f'{OUTPUT_DIR}{seq_id}/acceleration/{frame_i+1:06d}.png', acc_viz)
-            # cv2.imwrite(
-            #     f'{OUTPUT_DIR}{seq_id}/radial/{frame_i+1:06d}.png', rad_viz)
-            # cv2.imwrite(
-            #     f'{OUTPUT_DIR}{seq_id}/tangential/{frame_i+1:06d}.png', tan_viz)
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/velocity/{frame_i+1:06d}.png', vel_viz)
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/acceleration/{frame_i+1:06d}.png', acc_viz)
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/radial/{frame_i+1:06d}.png', rad_viz)
+            cv2.imwrite(
+                f'{OUTPUT_DIR}{seq_id}/tangential/{frame_i+1:06d}.png', tan_viz)
 
         # save average radial acceleration in body parts
         np.save(f'{INPUT_RAD_DIR}{seq_id}_rad_thigh.npy',
@@ -613,8 +613,8 @@ if __name__ == '__main__':
                 np.array(rad_leg_arr))
         np.save(f'{INPUT_RAD_DIR}{seq_id}_rad_torso.npy',
                 np.array(rad_torso_arr))
-        np.save(f'{INPUT_RAD_DIR}{seq_id}_rad_torso_15.npy',
-                np.array(rad_torso_15_arr))
+        # np.save(f'{INPUT_RAD_DIR}{seq_id}_rad_torso_15.npy',
+        #         np.array(rad_torso_15_arr))
         # np.save(f'{INPUT_RAD_DIR}{seq_id}_rad_torso_half.npy',
         #         np.array(rad_torso_half_arr))
         # np.save(f'{INPUT_RAD_DIR}{seq_id}_rad_torso_erosion.npy',
